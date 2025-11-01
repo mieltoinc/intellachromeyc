@@ -5,6 +5,7 @@
 import { storage } from './storage';
 import { mieltoAuth } from '@/lib/auth';
 import { Memory } from '@/types/memory';
+import { mossClient } from './moss-client';
 
 export interface MastraClientConfig {
   baseUrl?: string;
@@ -143,19 +144,56 @@ class MastraClient {
   }
 
   /**
-   * Ask Intella a question using Mastra (with automatic memory context)
+   * Ask Intella a question using Mastra (with automatic memory context and Moss search)
    */
   async askIntella(question: string): Promise<string> {
+    // Query Moss index for relevant memories
+    let mossContext = '';
+    try {
+      const mossResults = await mossClient.searchMemories(question, 5);
+      
+      if (mossResults.length > 0) {
+        console.log(`🔍 [Mastra] Found ${mossResults.length} relevant memories from Moss`);
+        
+        // Format Moss results as context
+        const mossContextParts = mossResults.map((result, index) => {
+          const metadata = result.metadata || {};
+          return `[Memory ${index + 1}] Title: ${metadata.title || 'Untitled'}
+URL: ${metadata.url || 'N/A'}
+Summary: ${result.text}
+Score: ${result.score.toFixed(3)}
+Timestamp: ${metadata.timestamp || 'N/A'}
+${metadata.keywords ? `Keywords: ${metadata.keywords}` : ''}`;
+        });
+        
+        mossContext = `Relevant memories from your browsing history:\n\n${mossContextParts.join('\n\n')}`;
+        console.log('✅ [Mastra] Moss context prepared');
+      }
+    } catch (mossError) {
+      console.warn('⚠️ [Mastra] Moss search failed (non-critical):', mossError);
+      // Continue without Moss context if search fails
+    }
+
     const messages: ChatMessage[] = [
       {
         role: 'system',
         content: 'You are Intella, a helpful AI assistant with access to the user\'s browsing memories. When relevant memories are available, reference them naturally in your responses.',
       },
-      {
-        role: 'user',
-        content: question,
-      }
     ];
+
+    // Add Moss context as a system message if available
+    if (mossContext) {
+      messages.push({
+        role: 'system',
+        content: mossContext,
+      });
+    }
+
+    // Add the user question
+    messages.push({
+      role: 'user',
+      content: question,
+    });
 
     const response = await this.chatWithMemories(messages);
     return response.content;

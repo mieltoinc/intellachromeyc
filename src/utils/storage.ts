@@ -58,9 +58,49 @@ class StorageManager {
   }
 
   // Memory operations
-  async saveMemory(memory: Memory): Promise<void> {
+  async saveMemory(memory: Memory): Promise<Memory> {
     const db = await this.getDB();
+    
+    // Check if a memory with the same URL already exists
+    const existingMemories = await this.getMemoriesByUrl(memory.url);
+    
+    if (existingMemories.length > 0) {
+      // Memory with this URL already exists - update it instead of creating duplicate
+      const existingMemory = existingMemories[0]; // Use the first one (most recent or oldest)
+      
+      console.log(`🔄 Memory with URL already exists (${existingMemory.id}), updating instead of creating duplicate`);
+      
+      // Merge the new memory data with existing memory, keeping the existing ID
+      const updatedMemory: Memory = {
+        ...existingMemory,
+        ...memory,
+        id: existingMemory.id, // Keep the original ID
+        url: memory.url, // Ensure URL stays the same
+        timestamp: existingMemory.timestamp, // Keep original timestamp (or use new one? user might want this configurable)
+        // Update summary, title, keywords if they've changed
+        summary: memory.summary || existingMemory.summary,
+        title: memory.title || existingMemory.title,
+        keywords: memory.keywords?.length ? memory.keywords : existingMemory.keywords,
+        entities: memory.entities || existingMemory.entities,
+        // Preserve existing metadata
+        meta_data: {
+          ...existingMemory.meta_data,
+          ...memory.meta_data,
+        },
+        // Update last accessed if provided
+        lastAccessed: memory.lastAccessed || existingMemory.lastAccessed,
+        accessCount: (existingMemory.accessCount || 0) + (memory.accessCount || 0),
+      };
+      
+      await db.put('memories', updatedMemory);
+      console.log(`✅ Updated existing memory: ${updatedMemory.id}`);
+      return updatedMemory;
+    }
+    
+    // No existing memory with this URL - create new one
     await db.put('memories', memory);
+    console.log(`✅ Created new memory: ${memory.id} for URL: ${memory.url}`);
+    return memory;
   }
 
   async getMemory(id: string): Promise<Memory | undefined> {

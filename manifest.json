@@ -20,15 +20,19 @@
   },
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
-      "js": ["content/index.js"],
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "content/index.js"
+      ],
       "run_at": "document_idle",
       "type": "module"
     }
   ],
   "action": {
     "default_title": "Open Intella Sidepanel",
-     "default_popup": "src/popup/index.html"
+    "default_popup": "src/popup/index.html"
   },
   "side_panel": {
     "default_path": "src/sidepanel/index.html"
@@ -50,8 +54,12 @@
         "chunks/*",
         "icons/*"
       ],
-      "matches": ["<all_urls>"]
+      "matches": [
+        "<all_urls>"
+      ]
     }
-  ]
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self';"
+  }
 }
-

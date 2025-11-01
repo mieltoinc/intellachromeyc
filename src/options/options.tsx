@@ -179,8 +179,19 @@ const OptionsInner: React.FC = () => {
       payload: query,
     });
 
-    if (response.success) {
-      setMemories(response.data);
+    if (response && response.success) {
+      const memories = response.data;
+      if (Array.isArray(memories)) {
+        console.log(`📋 Options page: Received ${memories.length} memories from search`);
+        setMemories(memories);
+      } else {
+        console.warn('⚠️ Options page: Invalid memories data format (not an array):', memories);
+        setMemories([]);
+      }
+    } else {
+      console.warn('⚠️ Options page: Search failed or invalid response:', response);
+      // Keep existing memories or set empty array
+      setMemories([]);
     }
   };
 

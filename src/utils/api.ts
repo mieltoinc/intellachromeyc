@@ -730,7 +730,7 @@ This content should be indexed and made searchable for future queries. Please ac
     if (context) {
       messages.splice(1, 0, {
         role: 'system',
-        content: `Additional context from local search: ${context}`,
+        content: `Additional context from local browsing history search: ${context}`,
       });
     }
 

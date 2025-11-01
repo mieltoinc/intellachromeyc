@@ -179,7 +179,7 @@ const SidePanelInner: React.FC = () => {
           if (response.success) {
             const assistantMessage: ChatMessage = {
               role: 'assistant',
-              content: `${response.data}\n\n_Note: Responded using fallback API_`,
+              content: `${response.data}`,
               timestamp: new Date(),
             };
             setChatMessages(prev => [...prev, assistantMessage]);
