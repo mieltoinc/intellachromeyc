@@ -55,10 +55,11 @@ class MastraClient {
 
   private async initializeMastraHandler() {
     try {
-      // Configure Mastra handler to use Mielto server endpoint
+      // Configure Mastra handler to use OpenAI-compatible endpoint instead of agent endpoint
       this.mastraHandler.updateConfig({
         baseUrl: this.config.baseUrl, // This should point to your Mielto/Mastra server
         agentName: 'intella-assistant', // Name of the agent on the server
+        useOpenAICompatible: true, // Use /api/v1/chat/completions instead of /api/agents/{agentName}/generate
         headers: {
           'X-Workspace-Id': this.config.workspace_id || '',
           'X-API-Key': this.config.apiKey || '',

@@ -17,6 +17,7 @@ export interface MastraConfig {
   retries?: number;
   backoffMs?: number;
   maxBackoffMs?: number;
+  useOpenAICompatible?: boolean;
 }
 
 export interface MastraResponse {
@@ -79,6 +80,10 @@ export class MastraHandler {
   async generate(messages: MastraMessage[]): Promise<MastraResponse> {
     await this.initialize();
 
+    if (this.config.useOpenAICompatible) {
+      return this.generateViaOpenAI(messages);
+    }
+
     if (!this.client) {
       throw new Error('Mastra Client not initialized');
     }
@@ -105,10 +110,64 @@ export class MastraHandler {
   }
 
   /**
+   * Generate response using OpenAI endpoint
+   */
+  private async generateViaOpenAI(messages: MastraMessage[]): Promise<MastraResponse> {
+    if (!this.config.baseUrl) {
+      throw new Error('Base URL is required for OpenAI-compatible mode');
+    }
+
+    try {
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        ...this.config.headers,
+      };
+
+      const response = await fetch(`${this.config.baseUrl}/api/v1/chat/completions`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          model: 'gpt-4o',
+          temperature: 0.7,
+          max_tokens: 2048,
+          stream: false,
+          messages: messages.map(msg => ({
+            role: msg.role,
+            content: msg.content,
+          })),
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`OpenAI-compatible API error: ${response.statusText} - ${errorText}`);
+      }
+
+      const result = await response.json();
+      
+      return {
+        content: result.choices?.[0]?.message?.content || '',
+        usage: result.usage ? {
+          prompt_tokens: result.usage.prompt_tokens || 0,
+          completion_tokens: result.usage.completion_tokens || 0,
+          total_tokens: result.usage.total_tokens || 0,
+        } : undefined,
+      };
+    } catch (error) {
+      console.error('OpenAI-compatible API error:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Stream response using Mastra Client
    */
   async stream(messages: MastraMessage[]): Promise<AsyncIterable<string>> {
     await this.initialize();
+
+    if (this.config.useOpenAICompatible) {
+      return this.streamViaOpenAI(messages);
+    }
 
     if (!this.client) {
       throw new Error('Mastra Client not initialized');
@@ -158,6 +217,105 @@ export class MastraHandler {
     } catch (error) {
       console.error('Error converting Mastra Client stream:', error);
       yield 'Error processing response';
+    }
+  }
+
+  /**
+   * Stream response using OpenAI-compatible endpoint
+   */
+  private async streamViaOpenAI(messages: MastraMessage[]): Promise<AsyncIterable<string>> {
+    if (!this.config.baseUrl) {
+      throw new Error('Base URL is required for OpenAI-compatible streaming mode');
+    }
+
+    try {
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        ...this.config.headers,
+      };
+
+      const response = await fetch(`${this.config.baseUrl}/api/v1/chat/completions`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          model: 'gpt-4o',
+          temperature: 0.7,
+          max_tokens: 2048,
+          stream: true,
+          messages: messages.map(msg => ({
+            role: msg.role,
+            content: msg.content,
+          })),
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`OpenAI-compatible streaming API error: ${response.statusText} - ${errorText}`);
+      }
+
+      return this.parseOpenAIStreamingResponse(response);
+    } catch (error) {
+      console.error('OpenAI-compatible streaming API error:', error);
+      // Fallback to regular generation and simulate streaming
+      const result = await this.generateViaOpenAI(messages);
+      return this.simulateStreamFromContent(result.content);
+    }
+  }
+
+  /**
+   * Parse streaming response from OpenAI-compatible endpoint
+   */
+  private async* parseOpenAIStreamingResponse(response: Response): AsyncIterable<string> {
+    if (!response.body) {
+      yield 'No response body';
+      return;
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value, { stream: true });
+        const lines = chunk.split('\n');
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const data = line.slice(6).trim();
+            if (data === '[DONE]') {
+              return;
+            }
+
+            try {
+              const parsed = JSON.parse(data);
+              const content = parsed.choices?.[0]?.delta?.content;
+              if (content) {
+                yield content;
+              }
+            } catch (e) {
+              // Skip invalid JSON lines
+              continue;
+            }
+          }
+        }
+      }
+    } finally {
+      reader.releaseLock();
+    }
+  }
+
+  /**
+   * Simulate streaming for fallback scenarios
+   */
+  private async* simulateStreamFromContent(content: string): AsyncIterable<string> {
+    const words = content.split(' ');
+    for (const word of words) {
+      yield word + ' ';
+      await new Promise(resolve => setTimeout(resolve, 50));
     }
   }
 
