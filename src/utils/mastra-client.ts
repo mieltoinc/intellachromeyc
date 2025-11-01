@@ -2,7 +2,6 @@
  * Mastra Client for Intella - Handles both LLM calls and Mielto API calls through Mastra
  */
 
-import { Agent } from '@mastra/core';
 import { storage } from './storage';
 import { mieltoAuth } from '@/lib/auth';
 import { Memory } from '@/types/memory';
@@ -315,7 +314,6 @@ Focus on extracting the most important information that would be useful for futu
   async updateConfig(newConfig: Partial<MastraClientConfig>): Promise<void> {
     this.config = { ...this.config, ...newConfig };
     // Reinitialize agent with new config
-    this.agent = null;
     await this.initialize();
   }
 

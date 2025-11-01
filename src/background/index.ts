@@ -8,6 +8,7 @@ import { storage } from '@/utils/storage';
 import { mieltoAPI } from '@/utils/api';
 import { Memory } from '@/types/memory';
 import { mieltoAuth } from '@/lib/auth';
+import { mossClient } from '@/utils/moss-client';
 
 // Initialize extension
 chrome.runtime.onInstalled.addListener(async () => {
@@ -271,6 +272,25 @@ async function handleMessage(message: Message, _sender: chrome.runtime.MessageSe
 async function handleSaveMemory(memory: Memory): Promise<MessageResponse> {
   await storage.saveMemory(memory);
 
+  // Embed memory into Moss (if enabled) - do this after local save but before backend sync
+  try {
+    const mossDocId = await mossClient.embedMemory(memory);
+    if (mossDocId && !memory.meta_data?.mossEmbedded) {
+      // Store Moss document ID in metadata for future reference
+      memory.meta_data = {
+        ...memory.meta_data,
+        mossDocId,
+        mossEmbedded: true,
+      };
+      // Update the memory in storage with Moss metadata
+      await storage.saveMemory(memory);
+      console.log('✅ Memory embedded in Moss');
+    }
+  } catch (mossError) {
+    console.warn('⚠️ Moss embedding failed (non-critical):', mossError);
+    // Continue with memory saving even if Moss embedding fails
+  }
+
   // Sync to backend using the /memories endpoint
   try {
     const settings = await storage.getSettings();
@@ -393,6 +413,13 @@ async function handleSyncMemories(): Promise<MessageResponse> {
 }
 
 async function handleDeleteMemory(id: string): Promise<MessageResponse> {
+  // Try to delete from Moss first (non-critical if it fails)
+  try {
+    await mossClient.deleteMemory(id);
+  } catch (mossError) {
+    console.warn('⚠️ Failed to delete memory from Moss (non-critical):', mossError);
+  }
+  
   await storage.deleteMemory(id);
   return { success: true };
 }
@@ -585,7 +612,7 @@ async function handleCaptureAndSave(payload: {
 
     console.log('✅ Memory created from AI summary');
 
-    // Step 3: Save memory using existing handler
+    // Step 3: Save memory using existing handler (Moss embedding happens in handleSaveMemory)
     return await handleSaveMemory(memory);
   } catch (error: any) {
     console.error('❌ Error creating memory from captured content:', error);

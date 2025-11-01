@@ -1,3 +1,6 @@
+import TurndownService from 'turndown'
+
+
 /**
  * Content Script - Injected into all pages
  * Handles page analysis and inline assistant
@@ -69,25 +72,31 @@ class DOMReader {
   }
 
   private static extractMainContent(): string {
-    const contentSelectors = ['article', 'main', '[role="main"]', '.content', '#content', '.post-content', '.entry-content'];
-    for (const selector of contentSelectors) {
-      const element = document.querySelector(selector);
-      if (element) {
-        return this.getTextContent(element);
-      }
-    }
-    return this.getTextContent(document.body);
+
+    let htmlBody = document.querySelector("body")
+    const htmlString = htmlBody?.outerHTML || '';
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(htmlString, 'text/html');
+    const scripts = doc.querySelectorAll('script');
+    scripts.forEach(script => {
+      script.remove();
+    });
+    const styles = doc.querySelectorAll('style');
+    styles.forEach(style => {
+      style.remove();
+    });
+
+    const iframes = doc.querySelectorAll('iframe');
+    iframes.forEach(iframe => {
+      iframe.remove();
+    });
+    const cleanedHtml = doc.documentElement.outerHTML;
+
+    const turndownService = new TurndownService()
+    const markdown = turndownService.turndown(cleanedHtml)
+    return markdown;
   }
 
-  private static getTextContent(element: Element): string {
-    const clone = element.cloneNode(true) as Element;
-    const unwantedSelectors = ['script', 'style', 'nav', 'footer', 'header', '.ad', '.advertisement'];
-    unwantedSelectors.forEach(selector => {
-      clone.querySelectorAll(selector).forEach(el => el.remove());
-    });
-    const text = clone.textContent || '';
-    return text.replace(/\s+/g, ' ').trim().slice(0, 10000);
-  }
 
   private static getMetaContent(name: string): string | null {
     const meta = document.querySelector(`meta[name="${name}"], meta[property="${name}"]`);

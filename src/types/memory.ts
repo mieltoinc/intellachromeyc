@@ -69,6 +69,13 @@ export interface UserSettings {
     fallbackToTraditional: boolean;
   };
   
+  // Moss Integration Settings
+  moss: {
+    projectId?: string;
+    projectKey?: string;
+    enabled?: boolean;
+  };
+  
   // Feature 2: Upgrade to Pro
   account: {
     plan: 'free' | 'pro';
@@ -120,6 +127,13 @@ export const DEFAULT_SETTINGS: UserSettings = {
     enabled: true, // Enable Mastra by default
     streamingEnabled: true,
     fallbackToTraditional: true,
+  },
+  
+  // Moss Integration Settings
+  moss: {
+    projectId: undefined,
+    projectKey: undefined,
+    enabled: false, // Disabled by default until credentials are configured
   },
   
   // Feature 2: Upgrade to Pro

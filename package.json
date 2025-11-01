@@ -10,9 +10,11 @@
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
+    "@inferedge/moss": "^1.0.0-beta.1",
     "@mastra/core": "^0.23.3",
     "@radix-ui/react-slot": "^1.2.3",
     "@supabase/supabase-js": "^2.76.1",
+    "@types/turndown": "^5.0.6",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "date-fns": "^3.0.0",
@@ -21,7 +23,8 @@
     "mastra": "^0.17.7",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "tailwind-merge": "^3.3.1"
+    "tailwind-merge": "^3.3.1",
+    "turndown": "^7.2.2"
   },
   "devDependencies": {
     "@types/chrome": "^0.0.254",
