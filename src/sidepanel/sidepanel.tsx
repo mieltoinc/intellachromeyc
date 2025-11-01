@@ -1252,7 +1252,7 @@ const SidePanelInner: React.FC = () => {
             {/* Input */}
             <div className="border-t border-gray-200 dark:border-darkBg-secondary bg-white dark:bg-darkBg-primary p-2">
               {/* Context indicator */}
-              <div id="current-page-context-container" className="px-2 flex items-center gap-2">
+              <div id="current-page-context-container" className="px-2 flex items-center gap-2" style={{ width: '50%' }}>
                 <button id="current-page-context" className="flex items-center gap-2 px-3 py-2 bg-gray-100 dark:bg-darkBg-secondary hover:bg-gray-200 dark:hover:bg-darkBg-tertiary rounded-lg transition flex-1" style={{ cursor: 'pointer', width: '50%' }}>
                   {currentPageInfo.hasInfo && currentPageInfo.favicon && !faviconError ? (
                     <img 
@@ -1268,8 +1268,7 @@ const SidePanelInner: React.FC = () => {
                     <Zap size={16} className="text-gray-600 dark:text-darkText-secondary" />
                   )}
                   <span className="text-sm text-gray-700 dark:text-darkText-secondary truncate">{currentPageInfo.title}</span>
-                </button>
-                {currentPageInfo.hasInfo && (
+                  {currentPageInfo.hasInfo && (
                   <button
                     onClick={clearCurrentPageInfo}
                     className="p-2 text-gray-600 dark:text-darkText-secondary hover:text-gray-900 dark:hover:text-darkText-primary hover:bg-gray-100 dark:hover:bg-darkBg-tertiary rounded-lg transition"
@@ -1278,6 +1277,8 @@ const SidePanelInner: React.FC = () => {
                     <X size={16} />
                   </button>
                 )}
+                </button>
+                
               </div>
               <div className="flex gap-2">
                 {/* Upload Button */}
