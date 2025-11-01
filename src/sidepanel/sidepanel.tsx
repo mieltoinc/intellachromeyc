@@ -6,6 +6,7 @@
 import React, { useState, useEffect, useRef, useReducer } from 'react';
 import ReactDOM from 'react-dom/client';
 import { Send, Search, BookOpen, Sparkles, Settings as SettingsIcon, RefreshCw, Plus, CheckCircle, AlertCircle, Loader2, Menu, Eye, EyeOff, Zap, Mic, MicOff, Phone, PhoneOff } from 'lucide-react';
+import { Send, Search, BookOpen, Sparkles, Settings as SettingsIcon, RefreshCw, Plus, CheckCircle, AlertCircle, Loader2, Menu, Eye, EyeOff, Zap, X } from 'lucide-react';
 import { MessageType } from '@/types/messages';
 import { Memory, UserSettings } from '@/types/memory';
 import { mieltoAPI } from '@/utils/api';
@@ -13,6 +14,7 @@ import { QuickActionsPopover } from '@/components/QuickActionsPopover';
 import { ChatMenuPopover } from '@/components/ChatMenuPopover';
 import { ConversationSwitcher } from '@/components/ConversationSwitcher';
 import { LoginScreen } from '@/components/LoginScreen';
+import { ModelSelector } from '@/components/ModelSelector';
 import { conversationReducer, initialConversationState } from '@/reducers/conversationReducer';
 import { listConversations, createConversation, deleteConversation, getConversationWithMessages } from '@/handlers/conversation.handler';
 import type { ConversationWithStats } from '@/handlers/conversation.handler';
@@ -23,11 +25,20 @@ import { ThemeToggle } from '@/components/ThemeToggle';
 import { LiveKitVoiceChat, createLiveKitToken } from '@/utils/livekit';
 import '../styles/app.css';
 
+interface ToolExecution {
+  toolName: string;
+  args: Record<string, any>;
+  success: boolean;
+  executionTime?: number;
+  error?: string;
+}
+
 interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
   timestamp: Date;
   usedMemories?: Memory[];
+  toolExecutions?: ToolExecution[];
 }
 
 const SidePanelInner: React.FC = () => {
@@ -54,6 +65,7 @@ const SidePanelInner: React.FC = () => {
   const [isVoiceChatActive, setIsVoiceChatActive] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [isMicEnabled, setIsMicEnabled] = useState(false);
+  const [selectedModel, setSelectedModel] = useState<string>('gpt-4o');
 
   // State tab variables (from popup)
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
@@ -67,6 +79,7 @@ const SidePanelInner: React.FC = () => {
     title: string;
     favicon?: string;
     hasInfo: boolean;
+    content?: string;
   }>({ title: 'Current Page Context', hasInfo: false });
   const [faviconError, setFaviconError] = useState(false);
 
@@ -80,6 +93,7 @@ const SidePanelInner: React.FC = () => {
     loadConversations();
     checkAuthAndLoadData();
     loadCurrentPageInfo();
+    loadSelectedModel();
 
     // Establish connection with background script for close detection
     const port = chrome.runtime.connect({ name: 'sidepanel' });
@@ -134,10 +148,15 @@ const SidePanelInner: React.FC = () => {
     try {
       console.log('🤖 Using AI SDK for chat...');
       
+      // Include current page context if available
+      const context = currentPageInfo.hasInfo && currentPageInfo.content 
+        ? currentPageInfo.content 
+        : undefined;
+      
       // Use traditional API (which now uses AI SDK internally)
       const response = await chrome.runtime.sendMessage({
         type: MessageType.ASK_INTELLA,
-        payload: { question: currentQuery },
+        payload: { question: currentQuery, context, model: selectedModel },
       });
 
       if (response.success) {
@@ -146,6 +165,7 @@ const SidePanelInner: React.FC = () => {
           content: response.data,
           timestamp: new Date(),
           // Note: usedMemories will be populated by the backend automatically
+          toolExecutions: (response as any).toolExecutions,
         };
         setChatMessages(prev => [...prev, assistantMessage]);
       } else {
@@ -155,9 +175,14 @@ const SidePanelInner: React.FC = () => {
       console.error('💥 Chat error:', error);
       
       try {
+        // Include current page context if available
+        const context = currentPageInfo.hasInfo && currentPageInfo.content 
+          ? currentPageInfo.content 
+          : undefined;
+        
         const response = await chrome.runtime.sendMessage({
           type: MessageType.ASK_INTELLA,
-          payload: { question: currentQuery },
+          payload: { question: currentQuery, context },
         });
 
         if (response.success) {
@@ -350,9 +375,15 @@ const SidePanelInner: React.FC = () => {
           try {
             // Use AI SDK for floating queries
             console.log('🤖 Using AI SDK for floating query...');
+            
+            // Include current page context if available
+            const context = currentPageInfo.hasInfo && currentPageInfo.content 
+              ? currentPageInfo.content 
+              : undefined;
+            
             const response = await chrome.runtime.sendMessage({
               type: MessageType.ASK_INTELLA,
-              payload: { question: query },
+              payload: { question: query, context, model: selectedModel },
             });
 
             if (response.success) {
@@ -417,10 +448,32 @@ const SidePanelInner: React.FC = () => {
           }
         }
         
+        // Try to get page content
+        let pageContent = '';
+        try {
+          const contentResponse = await chrome.runtime.sendMessage({
+            type: MessageType.GET_PAGE_CONTENT,
+          });
+          
+          if (contentResponse.success && contentResponse.data) {
+            // Format the page content for context
+            const { content, title: pageTitle, description } = contentResponse.data;
+            pageContent = `Page Title: ${pageTitle}\n`;
+            if (description) {
+              pageContent += `Description: ${description}\n`;
+            }
+            pageContent += `\nPage Content:\n${content}`;
+            console.log('✅ Loaded page content:', pageContent.substring(0, 200) + '...');
+          }
+        } catch (contentError) {
+          console.log('⚠️ Could not load page content:', contentError);
+        }
+        
         setCurrentPageInfo({
           title: tab.title,
           favicon: faviconUrl,
-          hasInfo: true
+          hasInfo: true,
+          content: pageContent
         });
       } else {
         console.log('⚠️ Could not get tab information, using fallback');
@@ -436,6 +489,14 @@ const SidePanelInner: React.FC = () => {
         hasInfo: false
       });
     }
+  };
+
+  const clearCurrentPageInfo = () => {
+    setCurrentPageInfo({
+      title: 'Current Page Context',
+      hasInfo: false,
+      content: undefined
+    });
   };
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -559,6 +620,103 @@ const SidePanelInner: React.FC = () => {
 
   const toggleUploadPopover = () => {
     setShowUploadPopover(!showUploadPopover);
+  };
+
+  const handleScreenshot = async () => {
+    setShowUploadPopover(false);
+    setIsLoading(true);
+
+    try {
+      // Capture screenshot using Chrome API
+      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (!tabs[0]?.id) {
+        throw new Error('No active tab found');
+      }
+
+      const dataUrl = await chrome.tabs.captureVisibleTab({
+        format: 'png',
+        quality: 90
+      });
+
+      // Add user message showing screenshot
+      const userMessage: ChatMessage = {
+        role: 'user',
+        content: `📸 Screenshot captured`,
+        timestamp: new Date(),
+      };
+      setChatMessages(prev => [...prev, userMessage]);
+
+      // Send to LLM with screenshot
+      const context = currentPageInfo.hasInfo && currentPageInfo.content 
+        ? currentPageInfo.content 
+        : undefined;
+
+      // Use multimodal message format - provide a default prompt for screenshots
+      const response = await chrome.runtime.sendMessage({
+        type: MessageType.ASK_INTELLA,
+        payload: { 
+          question: 'What do you see in this screenshot? Describe and analyze the content.',
+          context,
+          screenshot: dataUrl,
+          model: selectedModel
+        },
+      });
+
+      if (response.success) {
+        const assistantMessage: ChatMessage = {
+          role: 'assistant',
+          content: response.data,
+          timestamp: new Date(),
+          toolExecutions: (response as any).toolExecutions,
+        };
+        setChatMessages(prev => [...prev, assistantMessage]);
+      } else {
+        throw new Error(response.error || 'Failed to process screenshot');
+      }
+    } catch (error) {
+      console.error('Screenshot error:', error);
+      const errorMessage: ChatMessage = {
+        role: 'assistant',
+        content: `❌ Sorry, there was an error capturing the screenshot: ${error instanceof Error ? error.message : 'Unknown error'}. Please try again.`,
+        timestamp: new Date(),
+      };
+      setChatMessages(prev => [...prev, errorMessage]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleAttachCurrentPage = async () => {
+    setShowUploadPopover(false);
+    
+    try {
+      // Load current page info when user explicitly requests it
+      await loadCurrentPageInfo();
+      
+      // Show user confirmation - note: currentPageInfo will be updated in next render
+      // We'll just reload it and check the result
+      const pageInfo = await (async () => {
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        return tab;
+      })();
+      
+      if (pageInfo && pageInfo.title) {
+        const userMessage: ChatMessage = {
+          role: 'user',
+          content: `📄 Current page attached: ${pageInfo.title}`,
+          timestamp: new Date(),
+        };
+        setChatMessages(prev => [...prev, userMessage]);
+      }
+    } catch (error) {
+      console.error('Error attaching current page:', error);
+      const errorMessage: ChatMessage = {
+        role: 'assistant',
+        content: `❌ Sorry, there was an error attaching the current page: ${error instanceof Error ? error.message : 'Unknown error'}. Please try again.`,
+        timestamp: new Date(),
+      };
+      setChatMessages(prev => [...prev, errorMessage]);
+    }
   };
 
   const loadConversations = async () => {
@@ -775,6 +933,41 @@ const SidePanelInner: React.FC = () => {
     if (settingsResponse.success) {
       setSettings(settingsResponse.data);
       setIsAnalysisActive(settingsResponse.data.isAnalysisActive ?? true);
+      if (settingsResponse.data.selectedModel) {
+        setSelectedModel(settingsResponse.data.selectedModel);
+      }
+    }
+  };
+
+  const loadSelectedModel = async () => {
+    try {
+      const settingsResponse = await chrome.runtime.sendMessage({
+        type: MessageType.GET_SETTINGS,
+      });
+
+      if (settingsResponse.success && settingsResponse.data.selectedModel) {
+        setSelectedModel(settingsResponse.data.selectedModel);
+      }
+    } catch (error) {
+      console.error('Failed to load selected model:', error);
+    }
+  };
+
+  const handleModelChange = async (modelId: string) => {
+    setSelectedModel(modelId);
+    
+    // Save to settings
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: MessageType.UPDATE_SETTINGS,
+        payload: { selectedModel: modelId },
+      });
+
+      if (!response.success) {
+        console.error('Failed to save model selection:', response.error);
+      }
+    } catch (error) {
+      console.error('Error saving model selection:', error);
     }
   };
 
@@ -985,8 +1178,18 @@ const SidePanelInner: React.FC = () => {
 
   return (
     <div className="h-full flex flex-col bg-white dark:bg-darkBg-primary">
-      {/* Minimal Header with only menu button */}
-      <div className="flex justify-end p-3 dark:border-darkBg-secondary bg-white dark:bg-darkBg-primary">
+      {/* Header with model selector on left and menu on right */}
+      <div className="flex items-center justify-between p-3 dark:border-darkBg-secondary bg-white dark:bg-darkBg-primary">
+        {/* Left side - Model Selector */}
+        <div className="flex items-center">
+          {activeTab === 'chat' && (
+            <ModelSelector
+              selectedModel={selectedModel}
+              onModelChange={handleModelChange}
+            />
+          )}
+        </div>
+        {/* Right side - Theme toggle and menu */}
         <div className="flex items-center gap-2">
           <ThemeToggle />
           <div className="relative">
@@ -1104,6 +1307,46 @@ const SidePanelInner: React.FC = () => {
                           }`}
                       >
                         <div className="text-sm leading-relaxed">{msg.content}</div>
+                        {msg.toolExecutions && msg.toolExecutions.length > 0 && (
+                          <div className="mt-2 pt-2 border-t border-gray-200 dark:border-darkBg-secondary">
+                            <div className="text-xs text-gray-500 dark:text-darkText-tertiary mb-1.5 flex items-center gap-1">
+                              <Zap className="w-3 h-3" />
+                              Used {msg.toolExecutions.length} tool{msg.toolExecutions.length > 1 ? 's' : ''}:
+                            </div>
+                            <div className="space-y-1.5">
+                              {msg.toolExecutions.map((toolExec, i) => (
+                                <div 
+                                  key={i} 
+                                  className={`text-xs rounded px-2 py-1.5 ${
+                                    toolExec.success 
+                                      ? 'bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-300' 
+                                      : 'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300'
+                                  }`}
+                                >
+                                  <div className="flex items-center justify-between">
+                                    <span className="font-medium">{toolExec.toolName}</span>
+                                    {toolExec.executionTime && (
+                                      <span className="text-xs opacity-75 ml-2">
+                                        {toolExec.executionTime}ms
+                                      </span>
+                                    )}
+                                  </div>
+                                  {Object.keys(toolExec.args).length > 0 && (
+                                    <div className="mt-1 text-xs opacity-75">
+                                      {JSON.stringify(toolExec.args, null, 0).slice(0, 100)}
+                                      {JSON.stringify(toolExec.args).length > 100 ? '...' : ''}
+                                    </div>
+                                  )}
+                                  {toolExec.error && (
+                                    <div className="mt-1 text-xs opacity-90">
+                                      Error: {toolExec.error}
+                                    </div>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                         {msg.usedMemories && msg.usedMemories.length > 0 && (
                           <div className="mt-2 pt-2 border-t border-gray-200 dark:border-darkBg-secondary">
                             <div className="text-xs text-gray-500 dark:text-darkText-tertiary mb-1">
@@ -1170,8 +1413,8 @@ const SidePanelInner: React.FC = () => {
             {/* Input */}
             <div className="border-t border-gray-200 dark:border-darkBg-secondary bg-white dark:bg-darkBg-primary p-2">
               {/* Context indicator */}
-              <div className="px-2 flex">
-                <button id="current-page-context" className="flex items-center gap-2 px-3 py-2 bg-gray-100 dark:bg-darkBg-secondary hover:bg-gray-200 dark:hover:bg-darkBg-tertiary rounded-lg transition" style={{ width: '50%' }}>
+              <div id="current-page-context-container" className="px-2 flex items-center gap-2" style={{ width: '50%' }}>
+                <button id="current-page-context" className="flex justify-between items-center gap-2 px-2 py-1 bg-gray-100 dark:bg-darkBg-secondary hover:bg-gray-200 dark:hover:bg-darkBg-tertiary rounded-lg transition flex-1" style={{ cursor: 'pointer', width: '50%' }}>
                   {currentPageInfo.hasInfo && currentPageInfo.favicon && !faviconError ? (
                     <img 
                       src={currentPageInfo.favicon} 
@@ -1186,7 +1429,17 @@ const SidePanelInner: React.FC = () => {
                     <Zap size={16} className="text-gray-600 dark:text-darkText-secondary" />
                   )}
                   <span className="text-sm text-gray-700 dark:text-darkText-secondary truncate">{currentPageInfo.title}</span>
+                  {currentPageInfo.hasInfo && (
+                  <button
+                    onClick={clearCurrentPageInfo}
+                    className="p-2 text-gray-600 dark:text-darkText-secondary hover:text-gray-900 dark:hover:text-darkText-primary hover:bg-gray-100 dark:hover:bg-darkBg-tertiary rounded-lg transition"
+                    title="Clear page context"
+                  >
+                    <X size={16} />
+                  </button>
+                )}
                 </button>
+                
               </div>
               
               {/* Voice Chat Controls */}
@@ -1239,6 +1492,8 @@ const SidePanelInner: React.FC = () => {
                     isOpen={showUploadPopover}
                     onClose={() => setShowUploadPopover(false)}
                     onFileUpload={() => fileInputRef.current?.click()}
+                    onScreenshot={handleScreenshot}
+                    onAttachCurrentPage={handleAttachCurrentPage}
                     isUploading={uploadProgress.isUploading}
                   />
 

@@ -15,9 +15,17 @@ export interface MieltoConfig {
 
 export interface MieltoMessage {
   role: 'user' | 'assistant' | 'system' | 'tool';
-  content: string;
+  content: string | Array<{ type: 'text' | 'image'; text?: string; image?: string }>;
   tool_calls?: any[];
   tool_call_id?: string;
+}
+
+export interface ToolExecution {
+  toolName: string;
+  args: Record<string, any>;
+  success: boolean;
+  executionTime?: number;
+  error?: string;
 }
 
 export interface MieltoResponse {
@@ -27,6 +35,7 @@ export interface MieltoResponse {
     completion_tokens: number;
     total_tokens: number;
   };
+  toolExecutions?: ToolExecution[];
 }
 
 export interface MieltoMemoryData {
@@ -124,17 +133,18 @@ export class MieltoHandler {
         ...(msg.tool_call_id && { tool_call_id: msg.tool_call_id }),
       }));
 
-      // Use AI SDK client for generation
+      // Use AI SDK client for generation with tools enabled
       const result = await aiSDKClient.generate(aiMessages, {
         model: options.model,
         temperature: options.temperature,
         maxTokens: options.maxTokens,
-        enableTools: false, // Simple chat without tools
+        enableTools: true, // Enable tool calling
       });
 
       return {
         content: result.content,
         usage: result.usage,
+        toolExecutions: result.toolExecutions,
       };
     } catch (error) {
       console.error('Mielto chat error:', error);
@@ -167,7 +177,6 @@ export class MieltoHandler {
         model: options.model,
         temperature: options.temperature,
         maxTokens: options.maxTokens,
-        enableTools: false, // Simple chat without tools
       });
     } catch (error) {
       console.error('Mielto streaming error:', error);
@@ -190,56 +199,18 @@ export class MieltoHandler {
   }
 
   /**
-   * Chat with Mielto API and Composio tools enabled - Uses AI SDK
+   * Chat with Mielto API - Uses AI SDK (tools removed)
    */
   async chatWithTools(messages: MieltoMessage[], options: {
     model?: string;
     temperature?: number;
     maxTokens?: number;
     enableMemories?: boolean;
-    enableTools?: boolean;
-    maxToolIterations?: number;
   } = {}): Promise<MieltoResponse> {
     await this.initialize();
 
-    const {
-      enableTools = true,
-      maxToolIterations = 3,
-      ...chatOptions
-    } = options;
-
-    if (!enableTools) {
-      return this.chat(messages, chatOptions);
-    }
-
-    try {
-      // Convert MieltoMessage to AIMessage format
-      const aiMessages: AIMessage[] = messages.map(msg => ({
-        role: msg.role as 'user' | 'assistant' | 'system' | 'tool',
-        content: msg.content,
-        ...(msg.tool_calls && { tool_calls: msg.tool_calls }),
-        ...(msg.tool_call_id && { tool_call_id: msg.tool_call_id }),
-      }));
-
-      // Use AI SDK client with tools enabled
-      const result = await aiSDKClient.generate(aiMessages, {
-        model: chatOptions.model,
-        temperature: chatOptions.temperature,
-        maxTokens: chatOptions.maxTokens,
-        enableTools: true,
-        maxToolIterations,
-      });
-
-      return {
-        content: result.content,
-        usage: result.usage,
-      };
-    } catch (error) {
-      console.error('Mielto chat with tools error:', error);
-      // Fallback to regular chat
-      console.log('🔄 Falling back to regular chat without tools');
-      return this.chat(messages, chatOptions);
-    }
+    // Use regular chat (tools removed)
+    return this.chat(messages, options);
   }
 
   /**

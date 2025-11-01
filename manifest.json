@@ -11,6 +11,9 @@
     "contextMenus",
     "sidePanel"
   ],
+  "optional_permissions": [
+    "desktopCapture"
+  ],
   "host_permissions": [
     "<all_urls>"
   ],

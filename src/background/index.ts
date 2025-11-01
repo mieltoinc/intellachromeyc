@@ -9,10 +9,22 @@ import { mieltoAPI } from '@/utils/api';
 import { Memory } from '@/types/memory';
 import { mieltoAuth } from '@/lib/auth';
 import { mossClient } from '@/utils/moss-client';
+import { toolRegistry } from '@/utils/tool-registry';
+import { MemoryToolsProvider } from '@/utils/providers/memory-tools-provider';
+import { BrowserToolsProvider } from '@/utils/providers/browser-tools-provider';
 
-// Initialize Moss client on browser startup
+// Initialize tool providers and Moss client on browser startup
 chrome.runtime.onStartup.addListener(async () => {
-  console.log('🚀 Browser startup - initializing Moss client...');
+  console.log('🚀 Browser startup - initializing services...');
+  try {
+    // Initialize tool providers
+    await toolRegistry.registerProvider(new MemoryToolsProvider());
+    await toolRegistry.registerProvider(new BrowserToolsProvider());
+    console.log('✅ Tool providers initialized');
+  } catch (error) {
+    console.warn('⚠️ Failed to initialize tool providers:', error);
+  }
+  
   try {
     await mossClient.initialize();
   } catch (error) {
@@ -23,6 +35,15 @@ chrome.runtime.onStartup.addListener(async () => {
 // Initialize extension
 chrome.runtime.onInstalled.addListener(async () => {
   console.log('Intella extension installed');
+
+  // Initialize tool providers
+  try {
+    await toolRegistry.registerProvider(new MemoryToolsProvider());
+    await toolRegistry.registerProvider(new BrowserToolsProvider());
+    console.log('✅ Tool providers initialized');
+  } catch (error) {
+    console.warn('⚠️ Failed to initialize tool providers:', error);
+  }
 
   // Initialize Moss client
   try {
@@ -225,6 +246,9 @@ async function handleMessage(message: Message, _sender: chrome.runtime.MessageSe
 
       case MessageType.GET_SITE_VISIBILITY:
         return await handleGetSiteVisibility(message.payload);
+
+      case MessageType.GET_PAGE_CONTENT:
+        return await handleGetPageContent();
 
       case MessageType.ANALYZE_PAGE:
         return await handleAnalyzePage(message.payload);
@@ -553,6 +577,36 @@ async function handleGetSiteVisibility(domain: string): Promise<MessageResponse>
   return { success: true, data: isVisible };
 }
 
+async function handleGetPageContent(): Promise<MessageResponse> {
+  try {
+    // Get the active tab
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    
+    if (!tab?.id || !tab.url) {
+      return { success: false, error: 'No active tab found' };
+    }
+
+    // Check if the tab is a valid web page
+    if (tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://') || tab.url.startsWith('about:')) {
+      return { success: false, error: 'Cannot get content from chrome:// or extension pages' };
+    }
+
+    // Request page content from the content script
+    const response = await chrome.tabs.sendMessage(tab.id, {
+      type: MessageType.GET_PAGE_CONTENT,
+    });
+
+    if (response && response.success && response.data) {
+      return { success: true, data: response.data };
+    }
+
+    return { success: false, error: 'Failed to get page content' };
+  } catch (error: any) {
+    console.error('Error getting page content:', error);
+    return { success: false, error: error.message };
+  }
+}
+
 async function handleAnalyzePage(payload: any): Promise<MessageResponse> {
   try {
     const { content, url, title } = payload;
@@ -575,8 +629,21 @@ async function handleAnalyzePage(payload: any): Promise<MessageResponse> {
   }
 }
 
-async function handleAskIntella(payload: { question: string; context?: string }): Promise<MessageResponse> {
+async function handleAskIntella(payload: { question: string; context?: string; screenshot?: string; model?: string }): Promise<MessageResponse> {
   try {
+    // Ensure tool providers are initialized (service worker may have woken up)
+    try {
+      const providers = toolRegistry.getAllProviders();
+      if (providers.length === 0) {
+        console.log('🔧 Tool providers not initialized, registering...');
+        await toolRegistry.registerProvider(new MemoryToolsProvider());
+        await toolRegistry.registerProvider(new BrowserToolsProvider());
+        console.log('✅ Tool providers initialized');
+      }
+    } catch (error) {
+      console.warn('⚠️ Failed to initialize tool providers:', error);
+    }
+
     // Step 1: Query Moss index for relevant memories
     let mossContext = '';
     try {
@@ -591,11 +658,12 @@ async function handleAskIntella(payload: { question: string; context?: string })
         const mossContextParts = mossResults.map((result, index) => {
           const metadata = result.metadata || {};
           return `[Memory ${index + 1}] Title: ${metadata.title || 'Untitled'}
-URL: ${metadata.url || 'N/A'}
-Summary: ${result.text}
-Score: ${result.score.toFixed(3)}
-Timestamp: ${metadata.timestamp || 'N/A'}
-${metadata.keywords ? `Keywords: ${metadata.keywords}` : ''}`;
+              URL: ${metadata.url || 'N/A'}
+              Summary: ${result.text}
+              Score: ${result.score.toFixed(3)}
+              Timestamp: ${metadata.timestamp || 'N/A'}
+              ${metadata.keywords ? `Keywords: ${metadata.keywords}` : ''}
+            `;
         });
 
         mossContext = `Relevant memories from your browsing history:\n\n${mossContextParts.join('\n\n')}`;
@@ -615,10 +683,17 @@ ${metadata.keywords ? `Keywords: ${metadata.keywords}` : ''}`;
         ? `${combinedContext}\n\n${mossContext}`
         : mossContext;
     }
-
+    console.log('🔍 Combined context:', combinedContext);
     // Step 3: Send to Mielto with combined context
-    const response = await mieltoAPI.askIntella(payload.question, combinedContext);
-    return { success: true, data: response };
+    const model = payload.model || 'gpt-4o';
+    const response = payload.screenshot 
+      ? await mieltoAPI.askIntellaWithScreenshot(payload.question, combinedContext, payload.screenshot, model)
+      : await mieltoAPI.askIntella(payload.question, combinedContext, model);
+    return { 
+      success: true, 
+      data: response.content,
+      toolExecutions: response.toolExecutions,
+    };
   } catch (error: any) {
     console.error('Background: ASK_INTELLA error:', error);
     return { success: false, error: error.message };

@@ -49,6 +49,7 @@ export interface UserSettings {
   siteVisibility: Record<string, boolean>;
   ingestionMethod: 'completions' | 'upload' | 'both';
   isAnalysisActive: boolean;
+  selectedModel?: string;
   
   // Feature 4: Privacy & Blocked Sites
   privacy: {
@@ -69,17 +70,6 @@ export interface UserSettings {
     projectId?: string;
     projectKey?: string;
     enabled?: boolean;
-  };
-  
-  // Composio Integration Settings
-  composio: {
-    apiKey?: string;
-    baseUrl?: string;
-    enabled: boolean;
-    toolsEnabled: boolean;
-    shopifyConnected: boolean;
-    perplexityConnected: boolean;
-    hackernewsConnected: boolean;
   };
   
   // Feature 2: Upgrade to Pro
@@ -115,6 +105,7 @@ export const DEFAULT_SETTINGS: UserSettings = {
   defaultAction: 'popup',
   ingestionMethod: 'both',
   isAnalysisActive: true,
+  selectedModel: 'gpt-4o',
   
   // Feature 4: Privacy & Blocked Sites
   privacy: {
@@ -135,17 +126,6 @@ export const DEFAULT_SETTINGS: UserSettings = {
     projectKey: undefined,
     // Will auto-enable if env vars (VITE_MOSS_PROJECT_ID, VITE_MOSS_PROJECT_KEY) are set
     enabled: true,
-  },
-  
-  // Composio Integration Settings
-  composio: {
-    apiKey: undefined,
-    baseUrl: undefined,
-    enabled: false, // Disabled by default until API key is configured
-    toolsEnabled: false,
-    shopifyConnected: false,
-    perplexityConnected: false,
-    hackernewsConnected: false,
   },
   
   // Feature 2: Upgrade to Pro

@@ -6,6 +6,8 @@ interface QuickActionsPopoverProps {
   isOpen: boolean;
   onClose: () => void;
   onFileUpload: () => void;
+  onScreenshot?: () => void;
+  onAttachCurrentPage?: () => void;
   isUploading: boolean;
 }
 
@@ -13,6 +15,8 @@ export const QuickActionsPopover: React.FC<QuickActionsPopoverProps> = ({
   isOpen,
   onClose,
   onFileUpload,
+  onScreenshot,
+  onAttachCurrentPage,
   isUploading,
 }) => {
   return (
@@ -37,6 +41,7 @@ export const QuickActionsPopover: React.FC<QuickActionsPopoverProps> = ({
         </button>
         
         <button
+          onClick={onAttachCurrentPage}
           className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left hover:bg-gray-50 dark:hover:bg-darkBg-tertiary transition"
         >
           <Zap size={18} className="text-gray-600 dark:text-darkText-secondary" />
@@ -46,7 +51,9 @@ export const QuickActionsPopover: React.FC<QuickActionsPopoverProps> = ({
         </button>
         
         <button
+          onClick={onScreenshot}
           className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left hover:bg-gray-50 dark:hover:bg-darkBg-tertiary transition"
+          disabled={isUploading}
         >
           <Camera size={18} className="text-gray-600 dark:text-darkText-secondary" />
           <div className="flex-1">

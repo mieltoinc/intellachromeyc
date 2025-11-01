@@ -6,7 +6,7 @@
 class HalloweenContentTheme {
   private enabled = false;
   private elements: HTMLElement[] = [];
-  private intervals: NodeJS.Timeout[] = [];
+  private intervals: number[] = [];
 
   constructor() {
     // Spider webs are created dynamically in createSpiderWebSvg method
