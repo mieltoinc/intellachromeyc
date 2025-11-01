@@ -5,6 +5,7 @@
 
 import React, { useState, useEffect, useRef, useReducer } from 'react';
 import ReactDOM from 'react-dom/client';
+import { Send, Search, BookOpen, Sparkles, Settings as SettingsIcon, RefreshCw, Plus, CheckCircle, AlertCircle, Loader2, Menu, Eye, EyeOff, Zap, Mic, MicOff, Phone, PhoneOff } from 'lucide-react';
 import { Send, Search, BookOpen, Sparkles, Settings as SettingsIcon, RefreshCw, Plus, CheckCircle, AlertCircle, Loader2, Menu, Eye, EyeOff, Zap, X } from 'lucide-react';
 import { MessageType } from '@/types/messages';
 import { Memory, UserSettings } from '@/types/memory';
@@ -21,6 +22,7 @@ import { getFirstActiveApiKey } from '@/handlers/apikey.handler';
 import { mieltoAuth } from '@/lib/auth';
 import { ThemeProvider } from '@/components/ThemeContext';
 import { ThemeToggle } from '@/components/ThemeToggle';
+import { LiveKitVoiceChat, createLiveKitToken } from '@/utils/livekit';
 import '../styles/app.css';
 
 interface ToolExecution {
@@ -57,6 +59,12 @@ const SidePanelInner: React.FC = () => {
     message?: string;
   }>({ isUploading: false });
   // const [isStreaming, setIsStreaming] = useState(false);
+  
+  // Voice chat state
+  const [voiceChat, setVoiceChat] = useState<LiveKitVoiceChat | null>(null);
+  const [isVoiceChatActive, setIsVoiceChatActive] = useState(false);
+  const [isConnecting, setIsConnecting] = useState(false);
+  const [isMicEnabled, setIsMicEnabled] = useState(false);
   const [selectedModel, setSelectedModel] = useState<string>('gpt-4o');
 
   // State tab variables (from popup)
@@ -1001,6 +1009,9 @@ const SidePanelInner: React.FC = () => {
         setMemoriesCount(0);
         setIsAnalysisActive(true);
 
+        // Clean up voice chat
+        await handleEndVoiceChat();
+
         // Force refresh of the State tab to show login screen
         setActiveTab('state');
 
@@ -1012,6 +1023,156 @@ const SidePanelInner: React.FC = () => {
     } catch (error) {
       console.error('❌ Logout error:', error);
       alert('An error occurred during logout. Please try again.');
+    }
+  };
+
+  // Voice chat handlers
+  const handleStartVoiceChat = async () => {
+    if (!settings?.apiKey) {
+      alert('Please configure your API key in settings first.');
+      return;
+    }
+
+    setIsConnecting(true);
+    
+    // First, test if we can access microphone at all
+    try {
+      console.log('🔍 Testing microphone access...');
+      const testStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      testStream.getTracks().forEach(track => track.stop());
+      console.log('✅ Microphone access confirmed');
+    } catch (permError) {
+      console.error('❌ Microphone permission denied:', permError);
+      setIsConnecting(false);
+      alert('Microphone access is required for voice chat. Please:\n\n1. Click the microphone icon in your browser address bar\n2. Select "Allow"\n3. Try again\n\nOr go to Chrome Settings > Privacy and security > Site Settings > Microphone and allow access for this extension.');
+      return;
+    }
+    
+    try {
+      console.log('🎙️ Starting voice chat...');
+      
+      // Get user ID from settings if available
+      const userId = settings?.workspace_id || 'anonymous';
+      
+      // Create LiveKit token with API key and user ID
+      const { token, wsUrl } = await createLiveKitToken(settings.apiKey, userId);
+      
+      // Initialize voice chat
+      const livekitClient = new LiveKitVoiceChat();
+      
+      // Set up message handler to display responses in chat
+      livekitClient.onMessage((message) => {
+        try {
+          const data = JSON.parse(message);
+          if (data.type === 'response' && data.content) {
+            const assistantMessage: ChatMessage = {
+              role: 'assistant',
+              content: data.content,
+              timestamp: new Date(),
+            };
+            setChatMessages(prev => [...prev, assistantMessage]);
+          }
+        } catch (e) {
+          // If not JSON, treat as plain text response
+          const assistantMessage: ChatMessage = {
+            role: 'assistant',
+            content: message,
+            timestamp: new Date(),
+          };
+          setChatMessages(prev => [...prev, assistantMessage]);
+        }
+      });
+      
+      // Connect to LiveKit
+      await livekitClient.connect({
+        wsUrl,
+        token,
+        apiKey: settings.apiKey,
+        userId: userId
+      });
+      
+      // Enable microphone
+      await livekitClient.enableMicrophone();
+      
+      setVoiceChat(livekitClient);
+      setIsVoiceChatActive(true);
+      setIsMicEnabled(true);
+      
+      // Add system message to chat
+      const systemMessage: ChatMessage = {
+        role: 'assistant',
+        content: '🎙️ Voice chat started! You can now speak to me directly.',
+        timestamp: new Date(),
+      };
+      setChatMessages(prev => [...prev, systemMessage]);
+      
+      console.log('✅ Voice chat started successfully');
+    } catch (error) {
+      console.error('❌ Failed to start voice chat:', error);
+      
+      let errorMessage = 'Unknown error occurred';
+      if (error instanceof Error) {
+        if (error.message.includes('Microphone permission')) {
+          errorMessage = 'Please allow microphone access in your browser settings and try again.';
+        } else if (error.message.includes('Failed to create token')) {
+          errorMessage = 'Unable to connect to voice chat service. Please check your internet connection.';
+        } else {
+          errorMessage = error.message;
+        }
+      }
+      
+      alert(`Failed to start voice chat: ${errorMessage}`);
+      
+      // Add error message to chat
+      const errorChatMessage: ChatMessage = {
+        role: 'assistant',
+        content: `❌ Voice chat failed to start: ${errorMessage}`,
+        timestamp: new Date(),
+      };
+      setChatMessages(prev => [...prev, errorChatMessage]);
+    } finally {
+      setIsConnecting(false);
+    }
+  };
+
+  const handleEndVoiceChat = async () => {
+    if (voiceChat) {
+      try {
+        console.log('🎙️ Ending voice chat...');
+        await voiceChat.disconnect();
+        setVoiceChat(null);
+        setIsVoiceChatActive(false);
+        setIsMicEnabled(false);
+        
+        // Add system message to chat
+        const systemMessage: ChatMessage = {
+          role: 'assistant',
+          content: '🎙️ Voice chat ended. You can continue chatting with text.',
+          timestamp: new Date(),
+        };
+        setChatMessages(prev => [...prev, systemMessage]);
+        
+        console.log('✅ Voice chat ended successfully');
+      } catch (error) {
+        console.error('❌ Error ending voice chat:', error);
+      }
+    }
+  };
+
+  const handleToggleMicrophone = async () => {
+    if (!voiceChat) return;
+    
+    try {
+      if (isMicEnabled) {
+        await voiceChat.disableMicrophone();
+        setIsMicEnabled(false);
+      } else {
+        await voiceChat.enableMicrophone();
+        setIsMicEnabled(true);
+      }
+    } catch (error) {
+      console.error('❌ Error toggling microphone:', error);
+      alert('Failed to toggle microphone. Please try again.');
     }
   };
 
@@ -1280,6 +1441,37 @@ const SidePanelInner: React.FC = () => {
                 </button>
                 
               </div>
+              
+              {/* Voice Chat Controls */}
+              {isVoiceChatActive && (
+                <div className="px-2 mb-2">
+                  <div className="flex items-center justify-between p-3 bg-blue-50 dark:bg-darkBg-tertiary border border-blue-200 dark:border-darkBg-secondary rounded-lg">
+                    <div className="flex items-center gap-2">
+                      <div className={`w-2 h-2 rounded-full ${isMicEnabled ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`}></div>
+                      <span className="text-sm font-medium text-blue-700 dark:text-blue-300">
+                        Voice Chat {isMicEnabled ? 'Active' : 'Muted'}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={handleToggleMicrophone}
+                        className={`p-2 rounded-lg transition ${isMicEnabled ? 'bg-green-500 hover:bg-green-600 text-white' : 'bg-gray-500 hover:bg-gray-600 text-white'}`}
+                        title={isMicEnabled ? 'Mute microphone' : 'Unmute microphone'}
+                      >
+                        {isMicEnabled ? <Mic size={16} /> : <MicOff size={16} />}
+                      </button>
+                      <button
+                        onClick={handleEndVoiceChat}
+                        className="p-2 bg-red-500 hover:bg-red-600 text-white rounded-lg transition"
+                        title="End voice chat"
+                      >
+                        <PhoneOff size={16} />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+              
               <div className="flex gap-2">
                 {/* Upload Button */}
                 <div className="relative">
@@ -1327,6 +1519,23 @@ const SidePanelInner: React.FC = () => {
                     disabled={isLoading}
                   />
                 </div>
+                
+                {/* Voice Chat Button */}
+                {!isVoiceChatActive ? (
+                  <button
+                    onClick={handleStartVoiceChat}
+                    disabled={isConnecting || !settings?.apiKey}
+                    className="px-3 py-3 text-gray-600 dark:text-darkText-secondary hover:text-blue-600 dark:hover:text-blue-400 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                    title={!settings?.apiKey ? 'API key required for voice chat' : 'Start voice chat'}
+                  >
+                    {isConnecting ? (
+                      <Loader2 size={18} className="animate-spin" />
+                    ) : (
+                      <Phone size={18} />
+                    )}
+                  </button>
+                ) : null}
+                
                 <button
                   onClick={handleSendMessage}
                   disabled={isLoading || !query.trim()}
