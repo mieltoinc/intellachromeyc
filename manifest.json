@@ -1,0 +1,57 @@
+{
+  "manifest_version": 3,
+  "name": "Intella",
+  "version": "1.0.0",
+  "description": "Smart memory browser extension that enhances browsing and chat experiences by remembering key details from your web activity.",
+  "permissions": [
+    "storage",
+    "activeTab",
+    "scripting",
+    "tabs",
+    "contextMenus",
+    "sidePanel"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background/index.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content/index.js"],
+      "run_at": "document_idle",
+      "type": "module"
+    }
+  ],
+  "action": {
+    "default_title": "Open Intella Sidepanel",
+     "default_popup": "src/popup/index.html"
+  },
+  "side_panel": {
+    "default_path": "src/sidepanel/index.html"
+  },
+  "options_page": "src/options/index.html",
+  "commands": {
+    "open-sidepanel": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+I",
+        "mac": "Command+Shift+I"
+      },
+      "description": "Open Intella Side Panel"
+    }
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "content/*",
+        "chunks/*",
+        "icons/*"
+      ],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}
+

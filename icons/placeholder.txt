@@ -1,0 +1,4 @@
+# Icons Directory
+
+This directory will contain extension icons.
+Currently using placeholder during development.
