@@ -218,7 +218,7 @@ export class AISDKClient {
     await this.initialize();
 
     const {
-      model = this.config.model || 'gpt-4o',
+      model = this.config.model || 'anthropic/claude-3-7-sonnet-latest',
       temperature = this.config.temperature || 0.7,
       maxTokens = this.config.maxTokens || 2048,
       enableTools = this.config.enableTools ?? true,
@@ -244,7 +244,7 @@ export class AISDKClient {
       });
 
       // Call the provider function with the model name to get the language model
-      const languageModel = openaiProvider.chat(model || 'gpt-4o');
+      const languageModel = openaiProvider.chat(model || 'anthropic/claude-3-7-sonnet-latest');
 
       // Use AI SDK generateText with tools
       const result = await generateText({
@@ -298,7 +298,7 @@ export class AISDKClient {
     await this.initialize();
 
     const {
-      model = this.config.model || 'gpt-4o',
+      model = this.config.model || 'anthropic/claude-3-7-sonnet-latest',
       temperature = this.config.temperature || 0.7,
       maxTokens = this.config.maxTokens || 2048,
       enableTools = this.config.enableTools ?? true,
@@ -324,7 +324,7 @@ export class AISDKClient {
       });
 
       // Call the provider function with the model name to get the language model
-      const languageModel = openaiProvider.chat(model || 'gpt-4o');
+      const languageModel = openaiProvider.chat(model || 'anthropic/claude-3-7-sonnet-latest');
 
       // Use AI SDK streamText with tools
       const result = await streamText({

@@ -210,7 +210,7 @@ class MieltoAPI {
 
       // Use AI SDK client for generation
       const result = await aiSDKClient.generate(aiMessages, {
-        model: request.model || 'gpt-4o',
+        model: request.model || 'anthropic/claude-3-7-sonnet-latest',
         temperature: request.temperature,
         maxTokens: request.max_tokens,
         enableTools: false, // Simple chat without tools

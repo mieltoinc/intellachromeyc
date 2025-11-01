@@ -78,6 +78,7 @@ export interface UserSettings {
     toolsEnabled: boolean;
     shopifyConnected: boolean;
     perplexityConnected: boolean;
+    hackernewsConnected: boolean;
   };
   
   // Feature 2: Upgrade to Pro
@@ -142,6 +143,7 @@ export const DEFAULT_SETTINGS: UserSettings = {
     toolsEnabled: false,
     shopifyConnected: false,
     perplexityConnected: false,
+    hackernewsConnected: false,
   },
   
   // Feature 2: Upgrade to Pro

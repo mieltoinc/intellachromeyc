@@ -238,6 +238,7 @@ export class ComposioToolsHandler {
   async checkToolkitConnections(): Promise<{
     shopify: boolean;
     perplexity: boolean;
+    hackernews: boolean;
     connections: any[];
   }> {
     try {
@@ -250,6 +251,9 @@ export class ComposioToolsHandler {
         perplexity: connections.some(conn => 
           conn.toolkit.toLowerCase().includes('perplexity') && conn.status === 'active'
         ),
+        hackernews: connections.some(conn => 
+          (conn.toolkit.toLowerCase().includes('hackernews') || conn.toolkit.toLowerCase().includes('hacker')) && conn.status === 'active'
+        ),
         connections,
       };
     } catch (error) {
@@ -257,6 +261,7 @@ export class ComposioToolsHandler {
       return {
         shopify: false,
         perplexity: false,
+        hackernews: false,
         connections: [],
       };
     }
@@ -269,6 +274,7 @@ export class ComposioToolsHandler {
     success: boolean;
     shopifyAuth?: any;
     perplexityAuth?: any;
+    hackernewsAuth?: any;
     errors?: string[];
   }> {
     const result: any = { success: true, errors: [] };
@@ -296,6 +302,18 @@ export class ComposioToolsHandler {
           console.log('🧠 Perplexity authorization started');
         } catch (error) {
           const errorMsg = `Failed to initialize Perplexity: ${error}`;
+          result.errors.push(errorMsg);
+          console.error('❌', errorMsg);
+        }
+      }
+
+      // Initialize HackerNews if not connected
+      if (!connectionStatus.hackernews) {
+        try {
+          result.hackernewsAuth = await composioClient.authorizeToolkit('hackernews');
+          console.log('📰 HackerNews authorization started');
+        } catch (error) {
+          const errorMsg = `Failed to initialize HackerNews: ${error}`;
           result.errors.push(errorMsg);
           console.error('❌', errorMsg);
         }

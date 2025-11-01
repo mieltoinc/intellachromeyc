@@ -323,10 +323,14 @@ class StorageManager {
   }
 
   async setComposioConnectionStatus(
-    toolkit: 'shopify' | 'perplexity',
+    toolkit: 'shopify' | 'perplexity' | 'hackernews',
     connected: boolean
   ): Promise<void> {
-    const field = toolkit === 'shopify' ? 'shopifyConnected' : 'perplexityConnected';
+    const field = toolkit === 'shopify' 
+      ? 'shopifyConnected' 
+      : toolkit === 'perplexity' 
+        ? 'perplexityConnected' 
+        : 'hackernewsConnected';
     await this.updateComposioSettings({ [field]: connected });
   }
 }

@@ -90,9 +90,9 @@ export class ComposioClient {
   }
 
   /**
-   * Start authorization flow for a toolkit (Shopify or Perplexity)
+   * Start authorization flow for a toolkit (Shopify, Perplexity, or HackerNews)
    */
-  async authorizeToolkit(toolkit: 'shopify' | 'perplexityai'): Promise<AuthorizationFlow> {
+  async authorizeToolkit(toolkit: 'shopify' | 'perplexityai' | 'hackernews'): Promise<AuthorizationFlow> {
     await this.initialize();
 
     if (!this.composio) {
@@ -101,7 +101,9 @@ export class ComposioClient {
 
     try {
       const userId = await this.getUserId();
-      const authResult = await this.composio.toolkits.authorize(userId, toolkit) as any;
+      // Map toolkit names to Composio format (HACKERNEWS uses uppercase)
+      const composioToolkitName = toolkit === 'hackernews' ? 'HACKERNEWS' : toolkit;
+      const authResult = await this.composio.toolkits.authorize(userId, composioToolkitName) as any;
 
       const authFlow: AuthorizationFlow = {
         id: authResult.id,
@@ -165,7 +167,7 @@ export class ComposioClient {
 
     try {
       const userId = await this.getUserId();
-      const defaultToolkits = toolkits || ['shopify', 'perplexityai'];
+      const defaultToolkits = toolkits || ['shopify', 'perplexityai', 'HACKERNEWS'];
 
       const tools = await this.composio.tools.get(userId, {
         toolkits: defaultToolkits

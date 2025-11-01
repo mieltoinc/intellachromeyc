@@ -22,6 +22,7 @@ export function ComposioManager({ className }: ComposioManagerProps) {
     toolsEnabled: false,
     shopifyConnected: false,
     perplexityConnected: false,
+    hackernewsConnected: false,
   });
   
   const [apiKey, setApiKey] = useState('');
@@ -64,16 +65,21 @@ export function ComposioManager({ className }: ComposioManagerProps) {
       const perplexityConnected = connectionsList.some(conn => 
         conn.toolkit.toLowerCase().includes('perplexity') && conn.status === 'active'
       );
+      const hackernewsConnected = connectionsList.some(conn => 
+        (conn.toolkit.toLowerCase().includes('hackernews') || conn.toolkit.toLowerCase().includes('hacker')) && conn.status === 'active'
+      );
       
       await storage.updateComposioSettings({
         shopifyConnected,
         perplexityConnected,
+        hackernewsConnected,
       });
       
       setSettings(prev => ({
         ...prev,
         shopifyConnected,
         perplexityConnected,
+        hackernewsConnected,
       }));
     } catch (error) {
       console.error('Failed to load connections:', error);
@@ -130,7 +136,7 @@ export function ComposioManager({ className }: ComposioManagerProps) {
     }
   };
 
-  const authorizeToolkit = async (toolkit: 'shopify' | 'perplexityai') => {
+  const authorizeToolkit = async (toolkit: 'shopify' | 'perplexityai' | 'hackernews') => {
     if (!settings.enabled || !settings.apiKey) {
       setError('Please save your API key first');
       return;
@@ -194,7 +200,8 @@ export function ComposioManager({ className }: ComposioManagerProps) {
       setSuccess(
         `Found ${toolsInfo.length} tools. ` +
         `Shopify: ${connectionStatus.shopify ? 'Connected' : 'Not connected'}, ` +
-        `Perplexity: ${connectionStatus.perplexity ? 'Connected' : 'Not connected'}`
+        `Perplexity: ${connectionStatus.perplexity ? 'Connected' : 'Not connected'}, ` +
+        `HackerNews: ${connectionStatus.hackernews ? 'Connected' : 'Not connected'}`
       );
     } catch (error) {
       console.error('Failed to test tools:', error);
@@ -394,6 +401,50 @@ export function ComposioManager({ className }: ComposioManagerProps) {
                   <Button
                     size="sm"
                     onClick={() => authorizeToolkit('perplexityai')}
+                    disabled={loading}
+                    className="min-w-[90px]"
+                  >
+                    Connect
+                  </Button>
+                )}
+              </div>
+            </div>
+
+            {/* HackerNews */}
+            <div className="flex items-center justify-between p-4 border border-gray-200 dark:border-darkBg-secondary rounded-lg bg-white dark:bg-darkBg-secondary">
+              <div className="flex-1 min-w-0">
+                <span className="font-medium text-gray-900 dark:text-darkText-primary block mb-1">
+                  HackerNews
+                </span>
+                <p className="text-sm text-gray-600 dark:text-darkText-tertiary">
+                  Tech news and discussions
+                </p>
+              </div>
+              <div className="flex items-center gap-3 ml-4 flex-shrink-0">
+                <span className={`text-sm whitespace-nowrap ${settings.hackernewsConnected ? 'text-green-600 dark:text-green-400' : 'text-gray-500 dark:text-darkText-tertiary'}`}>
+                  {settings.hackernewsConnected ? 'Connected' : 'Not connected'}
+                </span>
+                {settings.hackernewsConnected ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      const hackernewsConnection = connections.find(c => 
+                        c.toolkit.toLowerCase().includes('hackernews') || c.toolkit.toLowerCase().includes('hacker')
+                      );
+                      if (hackernewsConnection) {
+                        disconnectToolkit(hackernewsConnection.id, 'HackerNews');
+                      }
+                    }}
+                    disabled={loading}
+                    className="min-w-[90px]"
+                  >
+                    Disconnect
+                  </Button>
+                ) : (
+                  <Button
+                    size="sm"
+                    onClick={() => authorizeToolkit('hackernews')}
                     disabled={loading}
                     className="min-w-[90px]"
                   >
