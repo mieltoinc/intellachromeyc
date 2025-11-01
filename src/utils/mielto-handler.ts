@@ -5,6 +5,7 @@
 import { storage } from './storage';
 import { mieltoAuth } from '@/lib/auth';
 import { Memory } from '@/types/memory';
+import { composioToolsHandler, type ToolCall } from './composio-tools';
 
 export interface MieltoConfig {
   baseUrl?: string;
@@ -13,8 +14,10 @@ export interface MieltoConfig {
 }
 
 export interface MieltoMessage {
-  role: 'user' | 'assistant' | 'system';
+  role: 'user' | 'assistant' | 'system' | 'tool';
   content: string;
+  tool_calls?: ToolCall[];
+  tool_call_id?: string;
 }
 
 export interface MieltoResponse {
@@ -250,6 +253,129 @@ export class MieltoHandler {
     for (const word of words) {
       yield word + ' ';
       await new Promise(resolve => setTimeout(resolve, 50));
+    }
+  }
+
+  /**
+   * Chat with Mielto API and Composio tools enabled
+   */
+  async chatWithTools(messages: MieltoMessage[], options: {
+    model?: string;
+    temperature?: number;
+    maxTokens?: number;
+    enableMemories?: boolean;
+    enableTools?: boolean;
+    maxToolIterations?: number;
+  } = {}): Promise<MieltoResponse> {
+    await this.initialize();
+
+    const {
+      enableTools = true,
+      maxToolIterations = 3,
+      ...chatOptions
+    } = options;
+
+    if (!enableTools) {
+      return this.chat(messages, chatOptions);
+    }
+
+    try {
+      // Get available Composio tools
+      const tools = await composioToolsHandler.getToolsForChat();
+      
+      if (tools.length === 0) {
+        console.log('ℹ️ No Composio tools available, using regular chat');
+        return this.chat(messages, chatOptions);
+      }
+
+      console.log(`🔧 Using ${tools.length} Composio tools in chat`);
+
+      let conversationMessages = [...messages];
+      let iterations = 0;
+
+      while (iterations < maxToolIterations) {
+        const headers = await this.getMemoryHeaders();
+        
+        const requestBody = {
+          model: chatOptions.model || 'gpt-4o',
+          temperature: chatOptions.temperature || 0.7,
+          max_tokens: chatOptions.maxTokens || 2048,
+          stream: false,
+          tools,
+          tool_choice: 'auto',
+          messages: conversationMessages.map(msg => ({
+            role: msg.role === 'tool' ? 'system' : msg.role,
+            content: msg.role === 'tool' ? `Tool result: ${msg.content}` : msg.content,
+            ...(msg.tool_calls && { tool_calls: msg.tool_calls }),
+            ...(msg.tool_call_id && { tool_call_id: msg.tool_call_id }),
+          })),
+        };
+
+        const response = await fetch(`${this.config.baseUrl}/api/v1/chat/completions`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(requestBody),
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`Mielto API error: ${response.statusText} - ${errorText}`);
+        }
+
+        const result = await response.json();
+        const choice = result.choices?.[0];
+        
+        if (!choice?.message) {
+          throw new Error('No response from API');
+        }
+
+        // Add assistant message to conversation
+        conversationMessages.push({
+          role: 'assistant',
+          content: choice.message.content || '',
+          tool_calls: choice.message.tool_calls,
+        });
+
+        // Check if there are tool calls
+        const toolCalls = choice.message.tool_calls;
+        if (!toolCalls || !Array.isArray(toolCalls) || toolCalls.length === 0) {
+          // No tool calls, return the response
+          return {
+            content: choice.message.content || '',
+            usage: result.usage ? {
+              prompt_tokens: result.usage.prompt_tokens || 0,
+              completion_tokens: result.usage.completion_tokens || 0,
+              total_tokens: result.usage.total_tokens || 0,
+            } : undefined,
+          };
+        }
+
+        console.log(`🔧 Processing ${toolCalls.length} tool calls (iteration ${iterations + 1})`);
+
+        // Execute tool calls
+        const toolResponses = await composioToolsHandler.executeToolCalls(toolCalls);
+        
+        // Add tool responses to conversation
+        conversationMessages.push(...toolResponses.map(resp => ({
+          role: 'tool' as const,
+          content: resp.content,
+          tool_call_id: resp.tool_call_id,
+        })));
+
+        iterations++;
+      }
+
+      console.warn(`⚠️ Reached maximum tool iterations (${maxToolIterations})`);
+      
+      // Make final request without tools to get summary
+      const finalResult = await this.chat(conversationMessages, chatOptions);
+      return finalResult;
+
+    } catch (error) {
+      console.error('Mielto chat with tools error:', error);
+      // Fallback to regular chat
+      console.log('🔄 Falling back to regular chat without tools');
+      return this.chat(messages, chatOptions);
     }
   }
 

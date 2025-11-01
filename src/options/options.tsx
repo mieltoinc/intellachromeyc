@@ -27,6 +27,7 @@ import {
 import { MessageType } from '@/types/messages';
 import { Memory, UserSettings, SiteVisibility } from '@/types/memory';
 import { LoginScreen } from '@/components/LoginScreen';
+import { ComposioManager } from '@/components/ComposioManager';
 import { getFirstActiveApiKey } from '@/handlers/apikey.handler';
 import { mieltoAuth } from '@/lib/auth';
 import { ThemeProvider, useTheme } from '@/components/ThemeContext';
@@ -47,7 +48,7 @@ const OptionsInner: React.FC = () => {
   // Authentication state
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
   
-  const [activeTab, setActiveTab] = useState<'memories' | 'chat' | 'settings' | 'privacy'>('memories');
+  const [activeTab, setActiveTab] = useState<'memories' | 'chat' | 'settings' | 'tools' | 'privacy'>('memories');
   const [memories, setMemories] = useState<Memory[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [settings, setSettings] = useState<UserSettings | null>(null);
@@ -476,6 +477,17 @@ const OptionsInner: React.FC = () => {
             >
               <Settings size={18} />
               Settings
+            </button>
+            <button
+              onClick={() => setActiveTab('tools')}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition ${
+                activeTab === 'tools'
+                  ? 'bg-blue-100 dark:bg-darkBg-tertiary text-blue-700 dark:text-blue-400'
+                  : 'text-gray-600 dark:text-darkText-tertiary hover:bg-gray-100 dark:hover:bg-darkBg-tertiary'
+              }`}
+            >
+              <Sparkles size={18} />
+              Tools
             </button>
             <button
               onClick={() => setActiveTab('privacy')}
@@ -1002,6 +1014,17 @@ const OptionsInner: React.FC = () => {
                 </p>
               </div>
             </div>
+          </div>
+        )}
+
+        {activeTab === 'tools' && (
+          <div className="bg-white dark:bg-darkBg-secondary rounded-xl shadow-sm p-8">
+            <h2 className="text-xl font-bold text-gray-900 dark:text-darkText-primary mb-2">Tools Integration</h2>
+            <p className="text-gray-600 dark:text-darkText-tertiary mb-6">
+              Connect external tools like Shopify and Perplexity AI to enhance your AI assistant capabilities.
+            </p>
+
+            <ComposioManager />
           </div>
         )}
 

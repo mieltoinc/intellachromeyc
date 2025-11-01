@@ -60,7 +60,7 @@ class MastraClient {
       this.mastraHandler.updateConfig({
         baseUrl: this.config.baseUrl, // This should point to your Mielto/Mastra server
         agentName: 'intella-assistant', // Name of the agent on the server
-        useOpenAICompatible: true, // Use /api/v1/chat/completions instead of /api/agents/{agentName}/generate
+        useOpenAICompatible: true,
         headers: {
           'X-Workspace-Id': this.config.workspace_id || '',
           'X-API-Key': this.config.apiKey || '',
@@ -97,9 +97,38 @@ class MastraClient {
   /**
    * Chat with memories - Uses Mastra Agent which calls Mielto completions endpoint
    */
-  async chatWithMemories(messages: ChatMessage[]): Promise<MastraResponse> {
+  async chatWithMemories(messages: ChatMessage[], options?: {
+    enableTools?: boolean;
+    maxToolIterations?: number;
+  }): Promise<MastraResponse> {
     await this.initialize();
 
+    const { enableTools = false } = options || {};
+
+    // If tools are requested, use Mielto handler with tools
+    if (enableTools && this.mieltoHandler.isReady()) {
+      try {
+        console.log('🔧 Using Mielto handler with Composio tools');
+        const mieltoMessages = messages.map(msg => ({
+          role: msg.role as any,
+          content: msg.content,
+        }));
+        
+        const result = await this.mieltoHandler.chatWithTools(mieltoMessages, {
+          enableTools: true,
+          maxToolIterations: options?.maxToolIterations || 3,
+        });
+        
+        return {
+          content: result.content,
+          usage: result.usage,
+        };
+      } catch (error) {
+        console.warn('⚠️ Mielto tools failed, falling back to Mastra:', error);
+      }
+    }
+
+    // Use Mastra handler (original functionality)
     if (!this.mastraHandler.isAgentReady()) {
       throw new Error('Mastra Agent not ready. Check Mielto endpoint configuration.');
     }

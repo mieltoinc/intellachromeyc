@@ -298,6 +298,37 @@ class StorageManager {
     
     console.log('🎉 All user data cleared successfully');
   }
+
+  // Composio settings helpers
+  async updateComposioSettings(updates: Partial<UserSettings['composio']>): Promise<void> {
+    const currentSettings = await this.getSettings();
+    await this.updateSettings({
+      composio: {
+        ...currentSettings.composio,
+        ...updates,
+      },
+    });
+  }
+
+  async getComposioSettings(): Promise<UserSettings['composio']> {
+    const settings = await this.getSettings();
+    return settings.composio;
+  }
+
+  async setComposioApiKey(apiKey: string): Promise<void> {
+    await this.updateComposioSettings({ 
+      apiKey,
+      enabled: true, // Auto-enable when API key is set
+    });
+  }
+
+  async setComposioConnectionStatus(
+    toolkit: 'shopify' | 'perplexity',
+    connected: boolean
+  ): Promise<void> {
+    const field = toolkit === 'shopify' ? 'shopifyConnected' : 'perplexityConnected';
+    await this.updateComposioSettings({ [field]: connected });
+  }
 }
 
 export const storage = new StorageManager();

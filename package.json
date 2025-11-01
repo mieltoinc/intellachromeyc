@@ -10,12 +10,15 @@
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
+    "@ai-sdk/openai": "^2.0.59",
+    "@composio/core": "^0.2.2",
     "@inferedge/moss": "^1.0.0-beta.1",
     "@mastra/client-js": "^0.16.8",
     "@mastra/core": "^0.23.3",
     "@radix-ui/react-slot": "^1.2.3",
     "@supabase/supabase-js": "^2.76.1",
     "@types/turndown": "^5.0.6",
+    "ai": "^5.0.86",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "date-fns": "^3.0.0",

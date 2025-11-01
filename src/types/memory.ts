@@ -76,6 +76,16 @@ export interface UserSettings {
     enabled?: boolean;
   };
   
+  // Composio Integration Settings
+  composio: {
+    apiKey?: string;
+    baseUrl?: string;
+    enabled: boolean;
+    toolsEnabled: boolean;
+    shopifyConnected: boolean;
+    perplexityConnected: boolean;
+  };
+  
   // Feature 2: Upgrade to Pro
   account: {
     plan: 'free' | 'pro';
@@ -135,6 +145,16 @@ export const DEFAULT_SETTINGS: UserSettings = {
     projectKey: undefined,
     // Will auto-enable if env vars (VITE_MOSS_PROJECT_ID, VITE_MOSS_PROJECT_KEY) are set
     enabled: true,
+  },
+  
+  // Composio Integration Settings
+  composio: {
+    apiKey: undefined,
+    baseUrl: undefined,
+    enabled: false, // Disabled by default until API key is configured
+    toolsEnabled: false,
+    shopifyConnected: false,
+    perplexityConnected: false,
   },
   
   // Feature 2: Upgrade to Pro

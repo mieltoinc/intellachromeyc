@@ -3,7 +3,10 @@
  */
 
 import { MastraClient } from '@mastra/client-js';
+import { generateText, tool } from 'ai';
+import { openai } from '@ai-sdk/openai';
 import { z } from 'zod';
+import { composioToolsHandler } from './composio-tools';
 
 export interface MastraMessage {
   role: 'user' | 'assistant' | 'system';
@@ -110,13 +113,142 @@ export class MastraHandler {
   }
 
   /**
-   * Generate response using OpenAI endpoint
+   * Generate response using Vercel AI SDK with tool calling support
    */
   private async generateViaOpenAI(messages: MastraMessage[]): Promise<MastraResponse> {
     if (!this.config.baseUrl) {
       throw new Error('Base URL is required for OpenAI-compatible mode');
     }
 
+    try {
+      // TODO: Fix AI SDK integration - commented out due to configuration issues
+      /*
+      console.log('🔧 Using AI SDK for OpenAI-compatible generation');
+
+      // Get available Composio tools
+      const composioTools = await composioToolsHandler.getAvailableToolsInfo();
+      
+      // Convert Composio tools to AI SDK tool format
+      const aiSdkTools: Record<string, any> = {};
+      
+      for (const composioTool of composioTools) {
+        if (composioTool.parameters?.properties) {
+          // Create Zod schema from Composio tool parameters
+          const schemaProps: Record<string, any> = {};
+          
+          for (const [propName, propDef] of Object.entries(composioTool.parameters.properties)) {
+            const def = propDef as any;
+            switch (def.type) {
+              case 'string':
+                schemaProps[propName] = z.string().describe(def.description || '');
+                break;
+              case 'number':
+                schemaProps[propName] = z.number().describe(def.description || '');
+                break;
+              case 'boolean':
+                schemaProps[propName] = z.boolean().describe(def.description || '');
+                break;
+              case 'array':
+                schemaProps[propName] = z.array(z.any()).describe(def.description || '');
+                break;
+              default:
+                schemaProps[propName] = z.any().describe(def.description || '');
+            }
+            
+            // Handle required fields
+            if (!composioTool.parameters.required?.includes(propName)) {
+              schemaProps[propName] = schemaProps[propName].optional();
+            }
+          }
+          
+          const toolSchema = z.object(schemaProps);
+          
+          aiSdkTools[composioTool.name] = tool({
+            description: composioTool.description || `Execute ${composioTool.name}`,
+            parameters: toolSchema,
+            execute: async (args: any) => {
+              console.log(`🔧 Executing Composio tool: ${composioTool.name}`, args);
+              
+              try {
+                const result = await composioToolsHandler.executeTool(composioTool.name, args);
+                return {
+                  success: result.success,
+                  data: result.data,
+                  error: result.error,
+                };
+              } catch (error) {
+                console.error(`❌ Tool execution error for ${composioTool.name}:`, error);
+                return {
+                  success: false,
+                  error: error instanceof Error ? error.message : 'Unknown error',
+                };
+              }
+            },
+          });
+        }
+      }
+
+      // Prepare headers for AI SDK
+      const headers: Record<string, string> = {
+        ...this.config.headers,
+      };
+
+      // Remove Content-Type as AI SDK handles it
+      delete headers['Content-Type'];
+
+      // Create OpenAI provider with custom base URL
+      const openaiProvider = openai({
+        apiKey: headers['X-API-Key'] || 'dummy-key',
+        baseURL: `${this.config.baseUrl}/api/v1`,
+      });
+
+      // Use AI SDK generateText with tools
+      const result = await generateText({
+        model: openaiProvider('gpt-4o'),
+        messages: messages.map(msg => ({
+          role: msg.role,
+          content: msg.content,
+        })),
+        tools: Object.keys(aiSdkTools).length > 0 ? aiSdkTools : undefined,
+        maxSteps: 3,
+        temperature: 0.7,
+        maxTokens: 2048,
+      });
+
+      console.log('🎯 AI SDK result:', {
+        text: result.text.slice(0, 100) + '...',
+        usage: result.usage,
+        toolCalls: result.toolCalls?.length || 0,
+        toolResults: result.toolResults?.length || 0,
+      });
+
+      return {
+        content: result.text,
+        usage: result.usage ? {
+          prompt_tokens: result.usage.promptTokens || 0,
+          completion_tokens: result.usage.completionTokens || 0,
+          total_tokens: result.usage.totalTokens || 0,
+        } : undefined,
+      };
+      */
+
+      // For now, fallback to fetch-based approach
+      console.log('🔄 Using fetch-based fallback for OpenAI generation');
+      return this.generateViaOpenAIFallback(messages);
+    } catch (error) {
+      console.error('AI SDK generation error:', error);
+      
+      // Fallback to original fetch-based approach if AI SDK fails
+      return this.generateViaOpenAIFallback(messages);
+    }
+  }
+
+  /**
+   * Fallback to original fetch-based approach
+   */
+  private async generateViaOpenAIFallback(messages: MastraMessage[]): Promise<MastraResponse> {
+    console.log('🔄 Using fetch-based fallback for OpenAI generation');
+    
     try {
       const headers: Record<string, string> = {
         'Content-Type': 'application/json',
@@ -154,7 +286,7 @@ export class MastraHandler {
         } : undefined,
       };
     } catch (error) {
-      console.error('OpenAI-compatible API error:', error);
+      console.error('OpenAI-compatible fallback API error:', error);
       throw error;
     }
   }
