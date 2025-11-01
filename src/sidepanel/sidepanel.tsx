@@ -9,7 +9,6 @@ import { Send, Search, BookOpen, Sparkles, Settings as SettingsIcon, RefreshCw, 
 import { MessageType } from '@/types/messages';
 import { Memory, UserSettings } from '@/types/memory';
 import { mieltoAPI } from '@/utils/api';
-import { mastraClient } from '@/utils/mastra-client';
 import { QuickActionsPopover } from '@/components/QuickActionsPopover';
 import { ChatMenuPopover } from '@/components/ChatMenuPopover';
 import { ConversationSwitcher } from '@/components/ConversationSwitcher';
@@ -125,27 +124,30 @@ const SidePanelInner: React.FC = () => {
     setQuery('');
     setIsLoading(true);
 
-    // Check if Mastra is enabled in settings
-    const useMastra = settings?.mastra?.enabled ?? true;
-
     try {
-      if (useMastra) {
-        console.log('🤖 Using Mastra client for chat...');
-        
-        // Use Mastra client for enhanced AI capabilities
-        const response = await mastraClient.askIntella(currentQuery);
-        
+      console.log('🤖 Using AI SDK for chat...');
+      
+      // Use traditional API (which now uses AI SDK internally)
+      const response = await chrome.runtime.sendMessage({
+        type: MessageType.ASK_INTELLA,
+        payload: { question: currentQuery },
+      });
+
+      if (response.success) {
         const assistantMessage: ChatMessage = {
           role: 'assistant',
-          content: response,
+          content: response.data,
           timestamp: new Date(),
-          // Note: Mastra automatically includes memory context
+          // Note: usedMemories will be populated by the backend automatically
         };
         setChatMessages(prev => [...prev, assistantMessage]);
       } else {
-        console.log('🔧 Using traditional API for chat...');
-        
-        // Fallback to traditional API
+        throw new Error(response.error);
+      }
+    } catch (error) {
+      console.error('💥 Chat error:', error);
+      
+      try {
         const response = await chrome.runtime.sendMessage({
           type: MessageType.ASK_INTELLA,
           payload: { question: currentQuery },
@@ -154,48 +156,15 @@ const SidePanelInner: React.FC = () => {
         if (response.success) {
           const assistantMessage: ChatMessage = {
             role: 'assistant',
-            content: response.data,
+            content: `${response.data}`,
             timestamp: new Date(),
-            // Note: usedMemories will be populated by the backend automatically
           };
           setChatMessages(prev => [...prev, assistantMessage]);
         } else {
           throw new Error(response.error);
         }
-      }
-    } catch (error) {
-      console.error('💥 Chat error:', error);
-      
-      // Try fallback if Mastra fails and fallback is enabled
-      const fallbackEnabled = settings?.mastra?.fallbackToTraditional ?? true;
-      if (useMastra && fallbackEnabled) {
-        console.log('🔄 Mastra failed, trying fallback to traditional API...');
-        try {
-          const response = await chrome.runtime.sendMessage({
-            type: MessageType.ASK_INTELLA,
-            payload: { question: currentQuery },
-          });
-
-          if (response.success) {
-            const assistantMessage: ChatMessage = {
-              role: 'assistant',
-              content: `${response.data}`,
-              timestamp: new Date(),
-            };
-            setChatMessages(prev => [...prev, assistantMessage]);
-          } else {
-            throw new Error(response.error);
-          }
-        } catch (fallbackError) {
-          console.error('💥 Fallback also failed:', fallbackError);
-          const errorMessage: ChatMessage = {
-            role: 'assistant',
-            content: 'Sorry, I encountered an error with both Mastra and the fallback API. Please try again.',
-            timestamp: new Date(),
-          };
-          setChatMessages(prev => [...prev, errorMessage]);
-        }
-      } else {
+      } catch (fallbackError) {
+        console.error('💥 Fallback also failed:', fallbackError);
         const errorMessage: ChatMessage = {
           role: 'assistant',
           content: 'Sorry, I encountered an error. Please try again.',
@@ -212,9 +181,9 @@ const SidePanelInner: React.FC = () => {
   // const handleSendMessageStreaming = async () => {
   //   if (!query.trim() || isLoading) return;
     
-  //   const streamingEnabled = settings?.mastra?.streamingEnabled ?? true;
-    
-  //   if (!useMastra || !streamingEnabled) return;
+  //   // Streaming functionality for future use
+  //   const streamingEnabled = true;
+  //   if (!streamingEnabled) return;
 
   //   const userMessage: ChatMessage = {
   //     role: 'user',
@@ -237,9 +206,9 @@ const SidePanelInner: React.FC = () => {
   //   setChatMessages(prev => [...prev, assistantMessage]);
 
   //   try {
-  //     console.log('🔥 Starting streaming chat with Mastra...');
+  //     console.log('🔥 Starting streaming chat...');
       
-  //     const stream = await mastraClient.streamChatWithMemories([
+  //     const stream = await mieltoHandler.streamChat([
   //       {
   //         role: 'system',
   //         content: 'You are Intella, a helpful AI assistant with access to the user\'s browsing memories.',
@@ -372,37 +341,23 @@ const SidePanelInner: React.FC = () => {
           setIsLoading(true);
 
           try {
-            // Use Mastra for floating queries too
-            const useMastra = settings?.mastra?.enabled ?? true;
-            
-            if (useMastra) {
-              console.log('🤖 Using Mastra client for floating query...');
-              const response = await mastraClient.askIntella(query);
-              
+            // Use AI SDK for floating queries
+            console.log('🤖 Using AI SDK for floating query...');
+            const response = await chrome.runtime.sendMessage({
+              type: MessageType.ASK_INTELLA,
+              payload: { question: query },
+            });
+
+            if (response.success) {
               const assistantMessage: ChatMessage = {
                 role: 'assistant',
-                content: response,
+                content: response.data,
                 timestamp: new Date(),
+                // Note: usedMemories will be populated by the backend automatically
               };
               setChatMessages(prev => [...prev, assistantMessage]);
             } else {
-              // Fallback to traditional API
-              const response = await chrome.runtime.sendMessage({
-                type: MessageType.ASK_INTELLA,
-                payload: { question: query },
-              });
-
-              if (response.success) {
-                const assistantMessage: ChatMessage = {
-                  role: 'assistant',
-                  content: response.data,
-                  timestamp: new Date(),
-                  // Note: usedMemories will be populated by the backend automatically
-                };
-                setChatMessages(prev => [...prev, assistantMessage]);
-              } else {
-                throw new Error(response.error);
-              }
+              throw new Error(response.error);
             }
           } catch (error) {
             console.error('Error in floating query submission:', error);

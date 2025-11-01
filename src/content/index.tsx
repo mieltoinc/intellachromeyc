@@ -78,6 +78,9 @@ class DOMReader {
     const parser = new DOMParser();
     const doc = parser.parseFromString(htmlString, 'text/html');
     const scripts = doc.querySelectorAll('script');
+    const noscripts = doc.querySelectorAll('noscript');
+    const links = doc.querySelectorAll('link');
+
     scripts.forEach(script => {
       script.remove();
     });
@@ -90,6 +93,15 @@ class DOMReader {
     iframes.forEach(iframe => {
       iframe.remove();
     });
+
+    noscripts.forEach(n => {
+      n.remove();
+    });
+
+    links.forEach(link => {
+      link.remove();
+    });
+
     const cleanedHtml = doc.documentElement.outerHTML;
 
     const turndownService = new TurndownService()

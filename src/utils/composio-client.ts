@@ -46,7 +46,7 @@ export class ComposioClient {
   private config: ComposioConfig = {};
   private isInitialized = false;
 
-  constructor() {}
+  constructor() { }
 
   async initialize(): Promise<void> {
     if (this.isInitialized && this.composio) {
@@ -56,7 +56,7 @@ export class ComposioClient {
     try {
       const settings = await storage.getSettings();
       this.config = {
-        apiKey: settings.composio?.apiKey || process.env.COMPOSIO_API_KEY,
+        apiKey: settings.composio?.apiKey || import.meta.env.VITE_COMPOSIO_API_KEY,
         baseUrl: settings.composio?.baseUrl,
       };
 
@@ -66,7 +66,6 @@ export class ComposioClient {
 
       this.composio = new Composio({
         apiKey: this.config.apiKey,
-        ...(this.config.baseUrl && { baseUrl: this.config.baseUrl }),
       });
 
       this.isInitialized = true;
@@ -95,7 +94,7 @@ export class ComposioClient {
    */
   async authorizeToolkit(toolkit: 'shopify' | 'perplexityai'): Promise<AuthorizationFlow> {
     await this.initialize();
-    
+
     if (!this.composio) {
       throw new Error('Composio client not initialized');
     }
@@ -127,14 +126,14 @@ export class ComposioClient {
    */
   async waitForConnection(authFlowId: string): Promise<ComposioConnection> {
     await this.initialize();
-    
+
     if (!this.composio) {
       throw new Error('Composio client not initialized');
     }
 
     try {
       const account = await this.composio.connectedAccounts.waitForConnection(authFlowId);
-      
+
       const connection: ComposioConnection = {
         id: account.id,
         toolkit: (account as any).toolkit?.slug || (account as any).toolkitName || 'unknown',
@@ -159,7 +158,7 @@ export class ComposioClient {
    */
   async getAvailableTools(toolkits?: string[]): Promise<ComposioTool[]> {
     await this.initialize();
-    
+
     if (!this.composio) {
       throw new Error('Composio client not initialized');
     }
@@ -167,9 +166,9 @@ export class ComposioClient {
     try {
       const userId = await this.getUserId();
       const defaultToolkits = toolkits || ['shopify', 'perplexityai'];
-      
-      const tools = await this.composio.tools.get(userId, { 
-        toolkits: defaultToolkits 
+
+      const tools = await this.composio.tools.get(userId, {
+        toolkits: defaultToolkits
       });
 
       const composioTools: ComposioTool[] = tools.map((tool: any) => ({
@@ -192,18 +191,18 @@ export class ComposioClient {
    * Execute a tool with given arguments
    */
   async executeTool(
-    toolName: string, 
+    toolName: string,
     args: Record<string, any>
   ): Promise<ToolExecutionResult> {
     await this.initialize();
-    
+
     if (!this.composio) {
       throw new Error('Composio client not initialized');
     }
 
     try {
       const userId = await this.getUserId();
-      
+
       const result = await this.composio.tools.execute(toolName, {
         userId,
         arguments: args,
@@ -235,7 +234,7 @@ export class ComposioClient {
    */
   async getOpenAITools(toolkits?: string[]): Promise<any[]> {
     const tools = await this.getAvailableTools(toolkits);
-    
+
     return tools.map(tool => ({
       type: 'function',
       function: {
@@ -251,7 +250,7 @@ export class ComposioClient {
    */
   async getConnections(): Promise<ComposioConnection[]> {
     await this.initialize();
-    
+
     if (!this.composio) {
       throw new Error('Composio client not initialized');
     }
@@ -280,7 +279,7 @@ export class ComposioClient {
    */
   async disconnectToolkit(connectionId: string): Promise<boolean> {
     await this.initialize();
-    
+
     if (!this.composio) {
       throw new Error('Composio client not initialized');
     }
@@ -288,7 +287,7 @@ export class ComposioClient {
     try {
       await this.composio.connectedAccounts.delete(connectionId);
       await this.removeConnection(connectionId);
-      
+
       console.log(`✅ Disconnected toolkit: ${connectionId}`);
       return true;
     } catch (error) {

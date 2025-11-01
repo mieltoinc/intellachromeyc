@@ -1,11 +1,11 @@
 /**
- * Mielto Handler - Dedicated handler for Mielto memory operations (not LLM calls)
+ * Mielto Handler - Dedicated handler for Mielto memory operations and LLM calls via AI SDK
  */
 
 import { storage } from './storage';
 import { mieltoAuth } from '@/lib/auth';
 import { Memory } from '@/types/memory';
-import { composioToolsHandler, type ToolCall } from './composio-tools';
+import { aiSDKClient, type AIMessage } from './ai-sdk-client';
 
 export interface MieltoConfig {
   baseUrl?: string;
@@ -16,7 +16,7 @@ export interface MieltoConfig {
 export interface MieltoMessage {
   role: 'user' | 'assistant' | 'system' | 'tool';
   content: string;
-  tool_calls?: ToolCall[];
+  tool_calls?: any[];
   tool_call_id?: string;
 }
 
@@ -52,10 +52,12 @@ export class MieltoHandler {
     try {
       const settings = await storage.getSettings();
       this.config = {
-        baseUrl: settings.apiUrl || 'http://localhost:8000',
+        baseUrl: settings.apiUrl || 'https://api.mielto.com',
         apiKey: settings.apiKey || '',
         workspace_id: settings.workspace_id || '',
       };
+      
+      // AI SDK will read baseUrl from settings and append /api/v1 during its initialization
       
       this.isInitialized = true;
       console.log('✅ Mielto Handler initialized successfully');
@@ -103,7 +105,7 @@ export class MieltoHandler {
   }
 
   /**
-   * Chat with Mielto API (with memory context)
+   * Chat with Mielto API (with memory context) - Uses AI SDK
    */
   async chat(messages: MieltoMessage[], options: {
     model?: string;
@@ -114,40 +116,25 @@ export class MieltoHandler {
     await this.initialize();
 
     try {
-      const headers = await this.getMemoryHeaders();
-      
-      const requestBody = {
-        model: options.model || 'gpt-4o',
-        temperature: options.temperature || 0.7,
-        max_tokens: options.maxTokens || 2048,
-        stream: false,
-        messages: messages.map(msg => ({
-          role: msg.role,
-          content: msg.content
-        })),
-      };
+      // Convert MieltoMessage to AIMessage format
+      const aiMessages: AIMessage[] = messages.map(msg => ({
+        role: msg.role as 'user' | 'assistant' | 'system' | 'tool',
+        content: msg.content,
+        ...(msg.tool_calls && { tool_calls: msg.tool_calls }),
+        ...(msg.tool_call_id && { tool_call_id: msg.tool_call_id }),
+      }));
 
-      const response = await fetch(`${this.config.baseUrl}/api/v1/chat/completions`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(requestBody),
+      // Use AI SDK client for generation
+      const result = await aiSDKClient.generate(aiMessages, {
+        model: options.model,
+        temperature: options.temperature,
+        maxTokens: options.maxTokens,
+        enableTools: false, // Simple chat without tools
       });
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Mielto API error: ${response.statusText} - ${errorText}`);
-      }
-
-      const result = await response.json();
-      const content = result.choices?.[0]?.message?.content || '';
-
       return {
-        content,
-        usage: result.usage ? {
-          prompt_tokens: result.usage.prompt_tokens || 0,
-          completion_tokens: result.usage.completion_tokens || 0,
-          total_tokens: result.usage.total_tokens || 0,
-        } : undefined,
+        content: result.content,
+        usage: result.usage,
       };
     } catch (error) {
       console.error('Mielto chat error:', error);
@@ -156,7 +143,7 @@ export class MieltoHandler {
   }
 
   /**
-   * Stream chat with Mielto API
+   * Stream chat with Mielto API - Uses AI SDK
    */
   async streamChat(messages: MieltoMessage[], options: {
     model?: string;
@@ -167,31 +154,21 @@ export class MieltoHandler {
     await this.initialize();
 
     try {
-      const headers = await this.getMemoryHeaders();
-      
-      const requestBody = {
-        model: options.model || 'gpt-4o',
-        temperature: options.temperature || 0.7,
-        max_tokens: options.maxTokens || 2048,
-        stream: true,
-        messages: messages.map(msg => ({
-          role: msg.role,
-          content: msg.content
-        })),
-      };
+      // Convert MieltoMessage to AIMessage format
+      const aiMessages: AIMessage[] = messages.map(msg => ({
+        role: msg.role as 'user' | 'assistant' | 'system' | 'tool',
+        content: msg.content,
+        ...(msg.tool_calls && { tool_calls: msg.tool_calls }),
+        ...(msg.tool_call_id && { tool_call_id: msg.tool_call_id }),
+      }));
 
-      const response = await fetch(`${this.config.baseUrl}/api/v1/chat/completions`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(requestBody),
+      // Use AI SDK client for streaming
+      return await aiSDKClient.stream(aiMessages, {
+        model: options.model,
+        temperature: options.temperature,
+        maxTokens: options.maxTokens,
+        enableTools: false, // Simple chat without tools
       });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Mielto streaming API error: ${response.statusText} - ${errorText}`);
-      }
-
-      return this.parseStreamingResponse(response);
     } catch (error) {
       console.error('Mielto streaming error:', error);
       // Fallback to regular chat and simulate streaming
@@ -200,50 +177,6 @@ export class MieltoHandler {
     }
   }
 
-  /**
-   * Parse streaming response from Mielto API
-   */
-  private async* parseStreamingResponse(response: Response): AsyncIterable<string> {
-    if (!response.body) {
-      yield 'No response body';
-      return;
-    }
-
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        const chunk = decoder.decode(value, { stream: true });
-        const lines = chunk.split('\n');
-
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const data = line.slice(6).trim();
-            if (data === '[DONE]') {
-              return;
-            }
-
-            try {
-              const parsed = JSON.parse(data);
-              const content = parsed.choices?.[0]?.delta?.content;
-              if (content) {
-                yield content;
-              }
-            } catch (e) {
-              // Skip invalid JSON lines
-              continue;
-            }
-          }
-        }
-      }
-    } finally {
-      reader.releaseLock();
-    }
-  }
 
   /**
    * Simulate streaming for fallback scenarios
@@ -257,7 +190,7 @@ export class MieltoHandler {
   }
 
   /**
-   * Chat with Mielto API and Composio tools enabled
+   * Chat with Mielto API and Composio tools enabled - Uses AI SDK
    */
   async chatWithTools(messages: MieltoMessage[], options: {
     model?: string;
@@ -280,97 +213,27 @@ export class MieltoHandler {
     }
 
     try {
-      // Get available Composio tools
-      const tools = await composioToolsHandler.getToolsForChat();
-      
-      if (tools.length === 0) {
-        console.log('ℹ️ No Composio tools available, using regular chat');
-        return this.chat(messages, chatOptions);
-      }
+      // Convert MieltoMessage to AIMessage format
+      const aiMessages: AIMessage[] = messages.map(msg => ({
+        role: msg.role as 'user' | 'assistant' | 'system' | 'tool',
+        content: msg.content,
+        ...(msg.tool_calls && { tool_calls: msg.tool_calls }),
+        ...(msg.tool_call_id && { tool_call_id: msg.tool_call_id }),
+      }));
 
-      console.log(`🔧 Using ${tools.length} Composio tools in chat`);
+      // Use AI SDK client with tools enabled
+      const result = await aiSDKClient.generate(aiMessages, {
+        model: chatOptions.model,
+        temperature: chatOptions.temperature,
+        maxTokens: chatOptions.maxTokens,
+        enableTools: true,
+        maxToolIterations,
+      });
 
-      let conversationMessages = [...messages];
-      let iterations = 0;
-
-      while (iterations < maxToolIterations) {
-        const headers = await this.getMemoryHeaders();
-        
-        const requestBody = {
-          model: chatOptions.model || 'gpt-4o',
-          temperature: chatOptions.temperature || 0.7,
-          max_tokens: chatOptions.maxTokens || 2048,
-          stream: false,
-          tools,
-          tool_choice: 'auto',
-          messages: conversationMessages.map(msg => ({
-            role: msg.role === 'tool' ? 'system' : msg.role,
-            content: msg.role === 'tool' ? `Tool result: ${msg.content}` : msg.content,
-            ...(msg.tool_calls && { tool_calls: msg.tool_calls }),
-            ...(msg.tool_call_id && { tool_call_id: msg.tool_call_id }),
-          })),
-        };
-
-        const response = await fetch(`${this.config.baseUrl}/api/v1/chat/completions`, {
-          method: 'POST',
-          headers,
-          body: JSON.stringify(requestBody),
-        });
-
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(`Mielto API error: ${response.statusText} - ${errorText}`);
-        }
-
-        const result = await response.json();
-        const choice = result.choices?.[0];
-        
-        if (!choice?.message) {
-          throw new Error('No response from API');
-        }
-
-        // Add assistant message to conversation
-        conversationMessages.push({
-          role: 'assistant',
-          content: choice.message.content || '',
-          tool_calls: choice.message.tool_calls,
-        });
-
-        // Check if there are tool calls
-        const toolCalls = choice.message.tool_calls;
-        if (!toolCalls || !Array.isArray(toolCalls) || toolCalls.length === 0) {
-          // No tool calls, return the response
-          return {
-            content: choice.message.content || '',
-            usage: result.usage ? {
-              prompt_tokens: result.usage.prompt_tokens || 0,
-              completion_tokens: result.usage.completion_tokens || 0,
-              total_tokens: result.usage.total_tokens || 0,
-            } : undefined,
-          };
-        }
-
-        console.log(`🔧 Processing ${toolCalls.length} tool calls (iteration ${iterations + 1})`);
-
-        // Execute tool calls
-        const toolResponses = await composioToolsHandler.executeToolCalls(toolCalls);
-        
-        // Add tool responses to conversation
-        conversationMessages.push(...toolResponses.map(resp => ({
-          role: 'tool' as const,
-          content: resp.content,
-          tool_call_id: resp.tool_call_id,
-        })));
-
-        iterations++;
-      }
-
-      console.warn(`⚠️ Reached maximum tool iterations (${maxToolIterations})`);
-      
-      // Make final request without tools to get summary
-      const finalResult = await this.chat(conversationMessages, chatOptions);
-      return finalResult;
-
+      return {
+        content: result.content,
+        usage: result.usage,
+      };
     } catch (error) {
       console.error('Mielto chat with tools error:', error);
       // Fallback to regular chat
@@ -428,8 +291,10 @@ ${entities.topics && entities.topics.length > 0 ? `\nTopics: ${entities.topics.j
     };
 
     // Make API call to create memory
+    // Note: Memory creation still uses fetch as it's not an LLM call
     const headers = await this.getMemoryHeaders();
-    const response = await fetch(`${this.config.baseUrl}/api/v1/memories`, {
+    const baseUrl = (this.config.baseUrl || 'https://api.mielto.com').replace(/\/$/, '');
+    const response = await fetch(`${baseUrl}/api/v1/memories`, {
       method: 'POST',
       headers,
       body: JSON.stringify(memoryData),
@@ -450,10 +315,11 @@ ${entities.topics && entities.topics.length > 0 ? `\nTopics: ${entities.topics.j
   async searchMemories(query: string): Promise<any[]> {
     await this.initialize();
 
+    // Note: Memory search still uses fetch as it's not an LLM call
     const headers = await this.getMemoryHeaders();
-    
+    const baseUrl = (this.config.baseUrl || 'https://api.mielto.com').replace(/\/$/, '');
     const response = await fetch(
-      `${this.config.baseUrl}/api/v1/contents?search=${encodeURIComponent(query)}`,
+      `${baseUrl}/api/v1/contents?search=${encodeURIComponent(query)}`,
       { headers }
     );
 

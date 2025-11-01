@@ -62,12 +62,6 @@ export interface UserSettings {
     floatingSearchPosition: 'bottom-right' | 'bottom-left';
   };
   
-  // Mastra Integration Settings
-  mastra: {
-    enabled: boolean;
-    streamingEnabled: boolean;
-    fallbackToTraditional: boolean;
-  };
   
   // Moss Integration Settings
   moss: {
@@ -130,13 +124,6 @@ export const DEFAULT_SETTINGS: UserSettings = {
     theme: 'system',
     floatingSearchEnabled: true, // Temporarily enabled for testing
     floatingSearchPosition: 'bottom-right',
-  },
-  
-  // Mastra Integration Settings
-  mastra: {
-    enabled: true, // Enable Mastra by default
-    streamingEnabled: true,
-    fallbackToTraditional: true,
   },
   
   // Moss Integration Settings

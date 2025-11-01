@@ -1,10 +1,11 @@
 /**
- * Mielto API Client for Intella
+ * Mielto API Client for Intella - Uses AI SDK for LLM calls
  */
 
 import { storage } from './storage';
 import { Memory } from '@/types/memory';
 import { mieltoAuth } from '@/lib/auth';
+import { aiSDKClient, type AIMessage } from './ai-sdk-client';
 
 export interface MieltoContext {
   workspace_id: string;
@@ -103,9 +104,12 @@ class MieltoAPI {
 
   async initialize() {
     const settings = await storage.getSettings();
-    this.baseUrl = settings.apiUrl || 'http://localhost:8000';
+    this.baseUrl = settings.apiUrl || 'https://api.mielto.com';
     this.apiKey = settings.apiKey || '';
     this.workspace_id = settings.workspace_id || '';
+    
+    // AI SDK will get baseUrl from settings and append /api/v1 internally
+    // No need to update it here as it will read from settings during initialization
   }
 
   async getBaseUrl(): Promise<string> {
@@ -138,54 +142,6 @@ class MieltoAPI {
     return headers;
   }
 
-  private async getChatHeaders(): Promise<HeadersInit> {
-    await this.initialize();
-    
-    const headers: HeadersInit = {
-      'Content-Type': 'application/json',
-      'x-memories-enabled': 'false',
-    };
-
-    // Get session data to extract user ID and workspace
-    const session = await mieltoAuth.getCurrentSession();
-    
-    if (session?.user?.id) {
-      headers['x-user-id'] = session.user.id.toString();
-    }
-
-    if (session?.workspace?.id) {
-      headers['X-Workspace-Id'] = session.workspace.id;
-    } else if (this.workspace_id) {
-      headers['X-Workspace-Id'] = this.workspace_id;
-    }
-
-    // TODO: Add conversation ID header when backend supports it
-    // const conversationId = await this.getConversationId();
-    // headers['x-conversation-id'] = conversationId;
-
-    // Add collection IDs header (get the Intella collection)
-    try {
-      const collectionId = await storage.getCollectionId();
-      if (collectionId) {
-        headers['x-collection-ids'] = JSON.stringify([collectionId]);
-        console.log('🗂️ Using collection ID for memories:', collectionId);
-      }
-    } catch (error) {
-      console.warn('Could not get collection ID for memories:', error);
-    }
-
-    // Handle authentication - prefer API key, fallback to token (only send one)
-    if (this.apiKey) {
-      headers['X-API-Key'] = this.apiKey;
-    } else {
-      const authHeader = await mieltoAuth.getAuthHeader();
-      if (authHeader) {
-        headers['Authorization'] = authHeader;
-      }
-    }
-
-    return headers;
-  }
 
   private async getUploadHeaders(): Promise<HeadersInit> {
     await this.initialize();
@@ -240,51 +196,44 @@ class MieltoAPI {
   }
 
   /**
-   * Chat completion (OpenAI-compatible endpoint)
+   * Chat completion - Uses AI SDK
    */
   async chat(request: ChatCompletionRequest): Promise<any> {
-    const headers = await this.getChatHeaders();
-    
-    const headersAny = headers as any;
-    const authType = headersAny['X-API-Key'] ? 'API_KEY' : 
-                     headersAny['Authorization'] ? 'TOKEN' : 'NONE';
-    
-    console.log('🤖 Mielto API: Making chat request with auth type:', authType, 'headers:', {
-      'Content-Type': headersAny['Content-Type'],
-      'x-memories-enabled': headersAny['x-memories-enabled'],
-      'x-user-id': headersAny['x-user-id'],
-      // 'x-conversation-id': headersAny['x-conversation-id'], // Disabled for now
-      'x-collection-ids': headersAny['x-collection-ids'],
-      'X-Workspace-Id': headersAny['X-Workspace-Id'],
-      'Authentication': authType === 'NONE' ? 'NONE' : '[REDACTED]',
-    });
-    
-    // Additional debugging for auth headers
-    if (authType !== 'NONE') {
-      console.log('🔍 Debug auth header format:', authType === 'API_KEY' ? 'X-API-Key header' : 'Authorization Bearer token');
+    await this.initialize();
+
+    try {
+      // Convert ChatCompletionRequest to AIMessage format
+      const aiMessages: AIMessage[] = request.messages.map(msg => ({
+        role: msg.role,
+        content: msg.content,
+      }));
+
+      // Use AI SDK client for generation
+      const result = await aiSDKClient.generate(aiMessages, {
+        model: request.model || 'gpt-4o',
+        temperature: request.temperature,
+        maxTokens: request.max_tokens,
+        enableTools: false, // Simple chat without tools
+      });
+
+      // Return in OpenAI-compatible format
+      return {
+        choices: [{
+          message: {
+            role: 'assistant',
+            content: result.content,
+          },
+        }],
+        usage: result.usage ? {
+          prompt_tokens: result.usage.prompt_tokens,
+          completion_tokens: result.usage.completion_tokens,
+          total_tokens: result.usage.total_tokens,
+        } : undefined,
+      };
+    } catch (error) {
+      console.error('🤖 Mielto API: Chat error:', error);
+      throw new Error(`API error: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
-    
-    const requestBody = {
-      model: 'gpt-4o',
-      temperature: 0.7,
-      max_tokens: 2048,
-      stream: false,
-      ...request,
-    };
-
-    const response = await fetch(`${this.baseUrl}/api/v1/chat/completions`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(requestBody),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('🤖 Mielto API: Chat error:', response.status, errorText);
-      throw new Error(`API error: ${response.statusText} - ${errorText}`);
-    }
-
-    return response.json();
   }
 
   /**
@@ -713,29 +662,66 @@ This content should be indexed and made searchable for future queries. Please ac
 
   /**
    * Ask Intella a question (memories will be automatically included by the API)
+   * Now uses AI SDK with Composio tools enabled
    */
   async askIntella(question: string, context?: string): Promise<string> {
-    const messages: MieltoMessage[] = [
-      {
-        role: 'system',
-        content: 'You are Intella, a helpful AI assistant with access to the user\'s browsing memories. When relevant memories are available, reference them naturally in your responses.',
-      },
-      {
-        role: 'user',
-        content: question,
-      }
-    ];
+    await this.initialize();
+    
+    // Check if Composio tools are enabled
+    const composioSettings = await storage.getComposioSettings();
+    const enableTools = composioSettings.enabled && composioSettings.toolsEnabled;
+    
+    if (enableTools) {
+      // Use mieltoHandler with tools enabled for better tool integration
+      const { MieltoHandler } = await import('./mielto-handler');
+      const handler = new MieltoHandler();
+      await handler.initialize();
+      
+      const messages = [
+        {
+          role: 'system' as const,
+          content: 'You are Intella, a helpful AI assistant with access to the user\'s browsing memories and external tools like Perplexity for search. When relevant memories are available, reference them naturally. When you need current information, use Perplexity search.',
+        },
+        ...(context ? [{
+          role: 'system' as const,
+          content: `Additional context from local browsing history search: ${context}`,
+        }] : []),
+        {
+          role: 'user' as const,
+          content: question,
+        },
+      ];
 
-    // If legacy context is provided (for backwards compatibility), add it as a system message
-    if (context) {
-      messages.splice(1, 0, {
-        role: 'system',
-        content: `Additional context from local browsing history search: ${context}`,
+      const result = await handler.chatWithTools(messages, {
+        enableTools: true,
+        maxToolIterations: 3,
       });
-    }
+      
+      return result.content || 'I apologize, but I could not generate a response.';
+    } else {
+      // Fallback to regular chat without tools
+      const messages: MieltoMessage[] = [
+        {
+          role: 'system',
+          content: 'You are Intella, a helpful AI assistant with access to the user\'s browsing memories. When relevant memories are available, reference them naturally in your responses.',
+        },
+        {
+          role: 'user',
+          content: question,
+        }
+      ];
 
-    const response = await this.chat({ messages });
-    return response.choices[0]?.message?.content || 'I apologize, but I could not generate a response.';
+      // If legacy context is provided (for backwards compatibility), add it as a system message
+      if (context) {
+        messages.splice(1, 0, {
+          role: 'system',
+          content: `Additional context from local browsing history search: ${context}`,
+        });
+      }
+
+      const response = await this.chat({ messages });
+      return response.choices[0]?.message?.content || 'I apologize, but I could not generate a response.';
+    }
   }
 
   /**

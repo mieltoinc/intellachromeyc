@@ -732,7 +732,7 @@ const OptionsInner: React.FC = () => {
                       type="text"
                       value={settings.apiUrl}
                       onChange={(e) => setSettings({ ...settings, apiUrl: e.target.value })}
-                      placeholder="http://localhost:8000"
+                      placeholder="https://api.mielto.com"
                       className="w-full px-4 py-2 border border-gray-200 dark:border-darkBg-secondary rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-darkBg-primary text-gray-900 dark:text-darkText-primary"
                     />
                   </div>
@@ -905,90 +905,6 @@ const OptionsInner: React.FC = () => {
                 </div>
               </div>
 
-              {/* Mastra Integration Settings */}
-              <div>
-                <h3 className="text-sm font-semibold text-gray-700 dark:text-darkText-secondary mb-3">
-                  🚀 Mastra Integration
-                  <span className="ml-2 inline-flex items-center bg-green-100 dark:bg-green-900/50 text-green-700 dark:text-green-300 text-xs font-medium px-2 py-0.5 rounded">
-                    NEW
-                  </span>
-                </h3>
-                
-                <div className="space-y-3">
-                  <label className="flex items-center justify-between p-4 bg-gray-50 dark:bg-darkBg-secondary/50 rounded-lg cursor-pointer">
-                    <div>
-                      <div className="font-medium text-gray-900 dark:text-darkText-primary">Enable Mastra</div>
-                      <div className="text-sm text-gray-500 dark:text-darkText-tertiary">Use Mastra framework for enhanced AI capabilities and multi-LLM support</div>
-                    </div>
-                    <input
-                      type="checkbox"
-                      checked={settings.mastra?.enabled ?? true}
-                      onChange={(e) => setSettings({ 
-                        ...settings, 
-                        mastra: { 
-                          ...settings.mastra, 
-                          enabled: e.target.checked 
-                        } 
-                      })}
-                      className="w-5 h-5 text-blue-600 rounded focus:ring-blue-500"
-                    />
-                  </label>
-
-                  <label className="flex items-center justify-between p-4 bg-gray-50 dark:bg-darkBg-secondary/50 rounded-lg cursor-pointer">
-                    <div>
-                      <div className="font-medium text-gray-900 dark:text-darkText-primary">Streaming Responses</div>
-                      <div className="text-sm text-gray-500 dark:text-darkText-tertiary">Enable real-time streaming chat responses for faster interaction</div>
-                    </div>
-                    <input
-                      type="checkbox"
-                      checked={settings.mastra?.streamingEnabled ?? true}
-                      onChange={(e) => setSettings({ 
-                        ...settings, 
-                        mastra: { 
-                          ...settings.mastra, 
-                          streamingEnabled: e.target.checked 
-                        } 
-                      })}
-                      className="w-5 h-5 text-blue-600 rounded focus:ring-blue-500"
-                      disabled={!settings.mastra?.enabled}
-                    />
-                  </label>
-
-                  <label className="flex items-center justify-between p-4 bg-gray-50 dark:bg-darkBg-secondary/50 rounded-lg cursor-pointer">
-                    <div>
-                      <div className="font-medium text-gray-900 dark:text-darkText-primary">Fallback to Traditional API</div>
-                      <div className="text-sm text-gray-500 dark:text-darkText-tertiary">Automatically fallback to traditional API if Mastra fails</div>
-                    </div>
-                    <input
-                      type="checkbox"
-                      checked={settings.mastra?.fallbackToTraditional ?? true}
-                      onChange={(e) => setSettings({ 
-                        ...settings, 
-                        mastra: { 
-                          ...settings.mastra, 
-                          fallbackToTraditional: e.target.checked 
-                        } 
-                      })}
-                      className="w-5 h-5 text-blue-600 rounded focus:ring-blue-500"
-                      disabled={!settings.mastra?.enabled}
-                    />
-                  </label>
-
-                  <div className="p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
-                    <div className="flex items-start gap-3">
-                      <div className="flex-shrink-0 w-6 h-6 bg-blue-500 rounded-full flex items-center justify-center mt-0.5">
-                        <span className="text-white text-xs font-bold">i</span>
-                      </div>
-                      <div className="text-sm text-blue-700 dark:text-blue-300">
-                        <strong>About Mastra:</strong> Mastra provides enhanced AI capabilities including multi-LLM support, 
-                        improved memory context integration, and real-time streaming responses. When enabled, 
-                        your chat interactions will use Mastra's advanced Agent framework while still connecting 
-                        to your Mielto backend for memory context.
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
 
               {/* Save Button */}
               <button

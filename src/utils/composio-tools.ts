@@ -197,7 +197,7 @@ export class ComposioToolsHandler {
    * Make the actual chat request (integrate with your existing API)
    */
   private async makeChatRequest(request: ChatCompletionWithTools): Promise<any> {
-    // This should integrate with your existing Mielto/Mastra API
+    // This integrates with your existing Mielto API via AI SDK
     // For now, using a placeholder - replace with your actual implementation
     
     const { mieltoAPI } = await import('./api');
@@ -227,8 +227,8 @@ export class ComposioToolsHandler {
   /**
    * Get available tools information
    */
-  async getAvailableToolsInfo(): Promise<ComposioTool[]> {
-    await this.ensureToolsLoaded();
+  async getAvailableToolsInfo(toolkits?: string[]): Promise<ComposioTool[]> {
+    await this.ensureToolsLoaded(toolkits);
     return [...this.availableTools];
   }
 

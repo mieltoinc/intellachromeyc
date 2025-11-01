@@ -4,7 +4,6 @@
 
 import { useState, useEffect } from 'react';
 import { Button } from './ui/button';
-import { Card } from './ui/card';
 import { Input } from './ui/input';
 import { composioClient, type ComposioConnection } from '@/utils/composio-client';
 import { composioToolsHandler } from '@/utils/composio-tools';
@@ -205,6 +204,28 @@ export function ComposioManager({ className }: ComposioManagerProps) {
     }
   };
 
+  const testPerplexitySearch = async () => {
+    setLoading(true);
+    setError(null);
+    
+    try {
+      const { testPerplexitySearch } = await import('@/utils/composio-test');
+      const result = await testPerplexitySearch('What are the latest developments in AI?');
+      
+      if (result.success) {
+        setSuccess(`Perplexity search test passed! Response length: ${result.data?.response?.length || 0} chars`);
+        console.log('🧪 Perplexity search result:', result.data);
+      } else {
+        setError(result.error || result.message);
+      }
+    } catch (error) {
+      console.error('Failed to test Perplexity search:', error);
+      setError('Failed to test Perplexity search');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // Clear messages after 5 seconds
   useEffect(() => {
     if (error || success) {
@@ -218,13 +239,15 @@ export function ComposioManager({ className }: ComposioManagerProps) {
 
   return (
     <div className={className}>
-      <Card className="p-6">
-        <h3 className="text-lg font-semibold mb-4">Composio Tools Integration</h3>
+      <div className="space-y-6">
+        <h3 className="text-lg font-semibold text-gray-900 dark:text-darkText-primary">
+          Composio Tools Integration
+        </h3>
         
         {/* API Key Configuration */}
-        <div className="space-y-4 mb-6">
+        <div className="space-y-4">
           <div>
-            <label className="block text-sm font-medium mb-2">
+            <label className="block text-sm font-medium mb-2 text-gray-700 dark:text-darkText-secondary">
               Composio API Key
             </label>
             <div className="flex gap-2">
@@ -239,6 +262,7 @@ export function ComposioManager({ className }: ComposioManagerProps) {
                 onClick={saveApiKey} 
                 disabled={loading}
                 variant="outline"
+                className="whitespace-nowrap"
               >
                 Save
               </Button>
@@ -246,7 +270,7 @@ export function ComposioManager({ className }: ComposioManagerProps) {
           </div>
           
           <div>
-            <label className="block text-sm font-medium mb-2">
+            <label className="block text-sm font-medium mb-2 text-gray-700 dark:text-darkText-secondary">
               Base URL (Optional)
             </label>
             <Input
@@ -259,18 +283,18 @@ export function ComposioManager({ className }: ComposioManagerProps) {
         </div>
 
         {/* Status Display */}
-        <div className="space-y-2 mb-6">
+        <div className="space-y-3 p-4 bg-gray-50 dark:bg-darkBg-tertiary rounded-lg">
           <div className="flex items-center justify-between">
-            <span className="text-sm font-medium">Status:</span>
-            <span className={`text-sm ${settings.enabled ? 'text-green-600' : 'text-red-600'}`}>
+            <span className="text-sm font-medium text-gray-700 dark:text-darkText-secondary">Status:</span>
+            <span className={`text-sm font-medium ${settings.enabled ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
               {settings.enabled ? 'Enabled' : 'Disabled'}
             </span>
           </div>
           
           <div className="flex items-center justify-between">
-            <span className="text-sm font-medium">Tools:</span>
+            <span className="text-sm font-medium text-gray-700 dark:text-darkText-secondary">Tools:</span>
             <div className="flex items-center gap-2">
-              <span className={`text-sm ${settings.toolsEnabled ? 'text-green-600' : 'text-gray-500'}`}>
+              <span className={`text-sm ${settings.toolsEnabled ? 'text-green-600 dark:text-green-400' : 'text-gray-500 dark:text-darkText-tertiary'}`}>
                 {settings.toolsEnabled ? 'Enabled' : 'Disabled'}
               </span>
               <Button
@@ -278,6 +302,7 @@ export function ComposioManager({ className }: ComposioManagerProps) {
                 variant="outline"
                 onClick={toggleTools}
                 disabled={!settings.enabled || loading}
+                className="min-w-[80px]"
               >
                 {settings.toolsEnabled ? 'Disable' : 'Enable'}
               </Button>
@@ -288,18 +313,20 @@ export function ComposioManager({ className }: ComposioManagerProps) {
         {/* Toolkit Connections */}
         {settings.enabled && (
           <div className="space-y-4">
-            <h4 className="font-medium">Connected Tools</h4>
+            <h4 className="font-medium text-gray-900 dark:text-darkText-primary">Connected Tools</h4>
             
             {/* Shopify */}
-            <div className="flex items-center justify-between p-3 border rounded-lg">
-              <div>
-                <span className="font-medium">Shopify</span>
-                <p className="text-sm text-gray-600">
+            <div className="flex items-center justify-between p-4 border border-gray-200 dark:border-darkBg-secondary rounded-lg bg-white dark:bg-darkBg-secondary">
+              <div className="flex-1 min-w-0">
+                <span className="font-medium text-gray-900 dark:text-darkText-primary block mb-1">
+                  Shopify
+                </span>
+                <p className="text-sm text-gray-600 dark:text-darkText-tertiary">
                   E-commerce platform integration
                 </p>
               </div>
-              <div className="flex items-center gap-2">
-                <span className={`text-sm ${settings.shopifyConnected ? 'text-green-600' : 'text-gray-500'}`}>
+              <div className="flex items-center gap-3 ml-4 flex-shrink-0">
+                <span className={`text-sm whitespace-nowrap ${settings.shopifyConnected ? 'text-green-600 dark:text-green-400' : 'text-gray-500 dark:text-darkText-tertiary'}`}>
                   {settings.shopifyConnected ? 'Connected' : 'Not connected'}
                 </span>
                 {settings.shopifyConnected ? (
@@ -315,6 +342,7 @@ export function ComposioManager({ className }: ComposioManagerProps) {
                       }
                     }}
                     disabled={loading}
+                    className="min-w-[90px]"
                   >
                     Disconnect
                   </Button>
@@ -323,6 +351,7 @@ export function ComposioManager({ className }: ComposioManagerProps) {
                     size="sm"
                     onClick={() => authorizeToolkit('shopify')}
                     disabled={loading}
+                    className="min-w-[90px]"
                   >
                     Connect
                   </Button>
@@ -331,15 +360,17 @@ export function ComposioManager({ className }: ComposioManagerProps) {
             </div>
 
             {/* Perplexity */}
-            <div className="flex items-center justify-between p-3 border rounded-lg">
-              <div>
-                <span className="font-medium">Perplexity AI</span>
-                <p className="text-sm text-gray-600">
+            <div className="flex items-center justify-between p-4 border border-gray-200 dark:border-darkBg-secondary rounded-lg bg-white dark:bg-darkBg-secondary">
+              <div className="flex-1 min-w-0">
+                <span className="font-medium text-gray-900 dark:text-darkText-primary block mb-1">
+                  Perplexity AI
+                </span>
+                <p className="text-sm text-gray-600 dark:text-darkText-tertiary">
                   AI-powered search and analysis
                 </p>
               </div>
-              <div className="flex items-center gap-2">
-                <span className={`text-sm ${settings.perplexityConnected ? 'text-green-600' : 'text-gray-500'}`}>
+              <div className="flex items-center gap-3 ml-4 flex-shrink-0">
+                <span className={`text-sm whitespace-nowrap ${settings.perplexityConnected ? 'text-green-600 dark:text-green-400' : 'text-gray-500 dark:text-darkText-tertiary'}`}>
                   {settings.perplexityConnected ? 'Connected' : 'Not connected'}
                 </span>
                 {settings.perplexityConnected ? (
@@ -355,6 +386,7 @@ export function ComposioManager({ className }: ComposioManagerProps) {
                       }
                     }}
                     disabled={loading}
+                    className="min-w-[90px]"
                   >
                     Disconnect
                   </Button>
@@ -363,6 +395,7 @@ export function ComposioManager({ className }: ComposioManagerProps) {
                     size="sm"
                     onClick={() => authorizeToolkit('perplexityai')}
                     disabled={loading}
+                    className="min-w-[90px]"
                   >
                     Connect
                   </Button>
@@ -371,7 +404,7 @@ export function ComposioManager({ className }: ComposioManagerProps) {
             </div>
 
             {/* Test Tools */}
-            <div className="pt-4 border-t">
+            <div className="pt-4 border-t border-gray-200 dark:border-darkBg-secondary space-y-2">
               <Button
                 variant="outline"
                 onClick={testTools}
@@ -380,23 +413,34 @@ export function ComposioManager({ className }: ComposioManagerProps) {
               >
                 Test Tools Connection
               </Button>
+              
+              {settings.perplexityConnected && (
+                <Button
+                  variant="outline"
+                  onClick={testPerplexitySearch}
+                  disabled={loading}
+                  className="w-full"
+                >
+                  Test Perplexity Search
+                </Button>
+              )}
             </div>
           </div>
         )}
 
         {/* Status Messages */}
         {error && (
-          <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-md">
-            <p className="text-sm text-red-600">{error}</p>
+          <div className="p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+            <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
           </div>
         )}
         
         {success && (
-          <div className="mt-4 p-3 bg-green-50 border border-green-200 rounded-md">
-            <p className="text-sm text-green-600">{success}</p>
+          <div className="p-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg">
+            <p className="text-sm text-green-600 dark:text-green-400">{success}</p>
           </div>
         )}
-      </Card>
+      </div>
     </div>
   );
 }
