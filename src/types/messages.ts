@@ -29,6 +29,7 @@ export enum MessageType {
   ANALYZE_PAGE = 'ANALYZE_PAGE',
   SUMMARIZE_PAGE = 'SUMMARIZE_PAGE',
   EXTRACT_ENTITIES = 'EXTRACT_ENTITIES',
+  GET_PAGE_CONTENT = 'GET_PAGE_CONTENT',
   
   // AI operations
   ASK_INTELLA = 'ASK_INTELLA',
@@ -76,10 +77,19 @@ export interface Message<T = any> {
   requestId?: string;
 }
 
+export interface ToolExecution {
+  toolName: string;
+  args: Record<string, any>;
+  success: boolean;
+  executionTime?: number;
+  error?: string;
+}
+
 export interface MessageResponse<T = any> {
   success: boolean;
   data?: T;
   error?: string;
+  toolExecutions?: ToolExecution[];
   requestId?: string;
 }
 

@@ -14,6 +14,8 @@ enum MessageType {
   GET_SITE_VISIBILITY = 'GET_SITE_VISIBILITY',
   ANALYZE_PAGE = 'ANALYZE_PAGE',
   SUMMARIZE_PAGE = 'SUMMARIZE_PAGE',
+  EXTRACT_ENTITIES = 'EXTRACT_ENTITIES',
+  GET_PAGE_CONTENT = 'GET_PAGE_CONTENT',
   ASK_INTELLA = 'ASK_INTELLA',
   IMPROVE_TEXT = 'IMPROVE_TEXT',
   TRANSLATE_TEXT = 'TRANSLATE_TEXT',
@@ -707,6 +709,9 @@ class ContentScript {
 
   private async handleMessage(message: Message): Promise<any> {
     switch (message.type) {
+      case MessageType.GET_PAGE_CONTENT:
+        return { success: true, data: DOMReader.extractPageContent() };
+
       case MessageType.SUMMARIZE_PAGE:
         return await this.summarizePage();
 
@@ -766,7 +771,81 @@ class ContentScript {
         return { success: true };
 
       default:
+        // Handle tool execution requests from background
+        if ((message as any).type === 'EXECUTE_TOOL') {
+          return await this.executeToolInPage((message as any).payload);
+        }
         return { success: false, error: 'Unknown message type' };
+    }
+  }
+
+  /**
+   * Execute a tool in the page context (DOM manipulation)
+   */
+  private async executeToolInPage(payload: { toolName: string; args: Record<string, any> }): Promise<any> {
+    const { toolName, args } = payload;
+    
+    try {
+      switch (toolName) {
+        case 'scroll_to_element': {
+          const { selector } = args;
+          const element = document.querySelector(selector);
+          if (!element) {
+            return {
+              success: false,
+              error: `Element with selector "${selector}" not found`,
+            };
+          }
+          element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          return {
+            success: true,
+            data: { message: `Scrolled to element: ${selector}` },
+          };
+        }
+
+        case 'click_element': {
+          const { selector } = args;
+          const element = document.querySelector(selector) as HTMLElement;
+          if (!element) {
+            return {
+              success: false,
+              error: `Element with selector "${selector}" not found`,
+            };
+          }
+          element.click();
+          return {
+            success: true,
+            data: { message: `Clicked element: ${selector}` },
+          };
+        }
+
+        case 'extract_text': {
+          const { selector } = args;
+          const element = document.querySelector(selector);
+          if (!element) {
+            return {
+              success: false,
+              error: `Element with selector "${selector}" not found`,
+            };
+          }
+          const text = element.textContent || '';
+          return {
+            success: true,
+            data: { text },
+          };
+        }
+
+        default:
+          return {
+            success: false,
+            error: `Unknown tool: ${toolName}`,
+          };
+      }
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      };
     }
   }
 

@@ -27,7 +27,6 @@ import {
 import { MessageType } from '@/types/messages';
 import { Memory, UserSettings, SiteVisibility } from '@/types/memory';
 import { LoginScreen } from '@/components/LoginScreen';
-import { ComposioManager } from '@/components/ComposioManager';
 import { getFirstActiveApiKey } from '@/handlers/apikey.handler';
 import { mieltoAuth } from '@/lib/auth';
 import { ThemeProvider, useTheme } from '@/components/ThemeContext';
@@ -936,11 +935,9 @@ const OptionsInner: React.FC = () => {
         {activeTab === 'tools' && (
           <div className="bg-white dark:bg-darkBg-secondary rounded-xl shadow-sm p-8">
             <h2 className="text-xl font-bold text-gray-900 dark:text-darkText-primary mb-2">Tools Integration</h2>
-            <p className="text-gray-600 dark:text-darkText-tertiary mb-6">
-              Connect external tools like Shopify and Perplexity AI to enhance your AI assistant capabilities.
+            <p className="text-gray-600 dark:text-darkText-tertiary">
+              Tools integration coming soon.
             </p>
-
-            <ComposioManager />
           </div>
         )}
 

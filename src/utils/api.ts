@@ -6,6 +6,9 @@ import { storage } from './storage';
 import { Memory } from '@/types/memory';
 import { mieltoAuth } from '@/lib/auth';
 import { aiSDKClient, type AIMessage } from './ai-sdk-client';
+import { MieltoHandler } from './mielto-handler';
+
+const handler = new MieltoHandler();
 
 export interface MieltoContext {
   workspace_id: string;
@@ -101,6 +104,32 @@ class MieltoAPI {
   private apiKey: string = '';
   private workspace_id: string = '';
   // private currentConversationId: string | null = null; // Disabled for now
+
+  /**
+   * Format model ID with provider prefix if needed
+   * OpenAI models: pass as-is
+   * Anthropic models: prefix with "anthropic/"
+   * Gemini models: prefix with "google/"
+   */
+  private formatModelId(modelId: string): string {
+    // Check if already prefixed
+    if (modelId.startsWith('anthropic/') || modelId.startsWith('google/')) {
+      return modelId;
+    }
+
+    // Anthropic models
+    if (modelId.startsWith('claude-')) {
+      return `anthropic/${modelId}`;
+    }
+
+    // Gemini models
+    if (modelId.startsWith('gemini-')) {
+      return `google/${modelId}`;
+    }
+
+    // OpenAI models (gpt-*) - pass as-is
+    return modelId;
+  }
 
   async initialize() {
     const settings = await storage.getSettings();
@@ -210,10 +239,9 @@ class MieltoAPI {
 
       // Use AI SDK client for generation
       const result = await aiSDKClient.generate(aiMessages, {
-        model: request.model || 'anthropic/claude-3-7-sonnet-latest',
+        model: request.model || 'gpt-4o',
         temperature: request.temperature,
         maxTokens: request.max_tokens,
-        enableTools: false, // Simple chat without tools
       });
 
       // Return in OpenAI-compatible format
@@ -662,66 +690,95 @@ This content should be indexed and made searchable for future queries. Please ac
 
   /**
    * Ask Intella a question (memories will be automatically included by the API)
-   * Now uses AI SDK with Composio tools enabled
    */
-  async askIntella(question: string, context?: string): Promise<string> {
+  async askIntella(question: string, context?: string, model?: string): Promise<{
+    content: string;
+    toolExecutions?: Array<{
+      toolName: string;
+      args: Record<string, any>;
+      success: boolean;
+      executionTime?: number;
+      error?: string;
+    }>;
+  }> {
     await this.initialize();
     
-    // Check if Composio tools are enabled
-    const composioSettings = await storage.getComposioSettings();
-    const enableTools = composioSettings.enabled && composioSettings.toolsEnabled;
+    // Use mieltoHandler for chat
+    await handler.initialize();
     
-    if (enableTools) {
-      // Use mieltoHandler with tools enabled for better tool integration
-      const { MieltoHandler } = await import('./mielto-handler');
-      const handler = new MieltoHandler();
-      await handler.initialize();
-      
-      const messages = [
-        {
-          role: 'system' as const,
-          content: 'You are Intella, a helpful AI assistant with access to the user\'s browsing memories and external tools like Perplexity for search. When relevant memories are available, reference them naturally. When you need current information, use Perplexity search.',
-        },
-        ...(context ? [{
-          role: 'system' as const,
-          content: `Additional context from local browsing history search: ${context}`,
-        }] : []),
-        {
-          role: 'user' as const,
-          content: question,
-        },
-      ];
+    const messages = [
+      {
+        role: 'system' as const,
+        content: 'You are Intella, a helpful AI assistant with access to the user\'s browsing memories. When relevant memories are available, reference them naturally.',
+      },
+      ...(context ? [{
+        role: 'system' as const,
+        content: `Additional context from local browsing history search: ${context}`,
+      }] : []),
+      {
+        role: 'user' as const,
+        content: question,
+      },
+    ];
 
-      const result = await handler.chatWithTools(messages, {
-        enableTools: true,
-        maxToolIterations: 3,
-      });
-      
-      return result.content || 'I apologize, but I could not generate a response.';
-    } else {
-      // Fallback to regular chat without tools
-      const messages: MieltoMessage[] = [
-        {
-          role: 'system',
-          content: 'You are Intella, a helpful AI assistant with access to the user\'s browsing memories. When relevant memories are available, reference them naturally in your responses.',
-        },
-        {
-          role: 'user',
-          content: question,
-        }
-      ];
+    const formattedModel = this.formatModelId(model || 'gpt-4o');
+    const result = await handler.chat(messages, {
+      model: formattedModel,
+    });
+    
+    return {
+      content: result.content || 'I apologize, but I could not generate a response.',
+      toolExecutions: result.toolExecutions,
+    };
+  }
 
-      // If legacy context is provided (for backwards compatibility), add it as a system message
-      if (context) {
-        messages.splice(1, 0, {
-          role: 'system',
-          content: `Additional context from local browsing history search: ${context}`,
-        });
-      }
+  /**
+   * Ask Intella with screenshot (multimodal)
+   */
+  async askIntellaWithScreenshot(question: string, context?: string, screenshot?: string, model?: string): Promise<{
+    content: string;
+    toolExecutions?: Array<{
+      toolName: string;
+      args: Record<string, any>;
+      success: boolean;
+      executionTime?: number;
+      error?: string;
+    }>;
+  }> {
+    await this.initialize();
+    
+    // Use mieltoHandler for chat
+    await handler.initialize();
+    
+    const messages = [
+      {
+        role: 'system' as const,
+        content: 'You are Intella, a helpful AI assistant with access to the user\'s browsing memories. When relevant memories are available, reference them naturally. You can analyze screenshots to help users understand what they see.',
+      },
+      ...(context ? [{
+        role: 'system' as const,
+        content: `Additional context from local browsing history search: ${context}`,
+      }] : []),
+      {
+        role: 'user' as const,
+        content: screenshot 
+          ? [
+              { type: 'image' as const, image: screenshot },
+              ...(question ? [{ type: 'text' as const, text: question }] : [])
+            ]
+          : question,
+      },
+    ];
 
-      const response = await this.chat({ messages });
-      return response.choices[0]?.message?.content || 'I apologize, but I could not generate a response.';
-    }
+    const formattedModel = this.formatModelId(model || 'gpt-4o');
+    const result = await handler.chat(messages, {
+      model: formattedModel,
+    });
+    
+    return {
+      content: result.content || 'I apologize, but I could not generate a response.',
+      toolExecutions: result.toolExecutions,
+    };
   }
 
   /**

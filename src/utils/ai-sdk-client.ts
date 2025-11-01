@@ -3,18 +3,25 @@
  * Uses api.mielto.com (appends /api/v1 automatically) as the base URL
  */
 
-import { generateText, streamText, tool } from 'ai';
+import { generateText, streamText, tool, stepCountIs } from 'ai';
 import { createOpenAI } from '@ai-sdk/openai';
-import { z } from 'zod';
 import { storage } from './storage';
 import { mieltoAuth } from '@/lib/auth';
-import { composioToolsHandler, type ToolCall } from './composio-tools';
+import { toolRegistry } from './tool-registry';
 
 export interface AIMessage {
   role: 'user' | 'assistant' | 'system' | 'tool';
-  content: string;
-  tool_calls?: ToolCall[];
+  content: string | Array<{ type: 'text' | 'image'; text?: string; image?: string }>;
+  tool_calls?: any[];
   tool_call_id?: string;
+}
+
+export interface ToolExecution {
+  toolName: string;
+  args: Record<string, any>;
+  success: boolean;
+  executionTime?: number;
+  error?: string;
 }
 
 export interface AIResponse {
@@ -24,6 +31,7 @@ export interface AIResponse {
     completion_tokens: number;
     total_tokens: number;
   };
+  toolExecutions?: ToolExecution[];
 }
 
 export interface AIConfig {
@@ -31,8 +39,6 @@ export interface AIConfig {
   model?: string;
   temperature?: number;
   maxTokens?: number;
-  enableTools?: boolean;
-  maxToolIterations?: number;
 }
 
 export class AISDKClient {
@@ -60,11 +66,9 @@ export class AISDKClient {
 
       this.config = {
         baseUrl: aiSdkBaseUrl,
-        model: 'anthropic/claude-3-7-sonnet-latest',
+        model: 'gpt-4o',
         temperature: 0.7,
         maxTokens: 2048,
-        enableTools: true,
-        maxToolIterations: 3,
       };
 
       this.isInitialized = true;
@@ -129,79 +133,6 @@ export class AISDKClient {
     return headers['X-API-Key'] || headers['Authorization']?.replace(/^Bearer\s+/i, '') || 'dummy-key';
   }
 
-
-  /**
-   * Convert Composio tools to AI SDK tool format
-   */
-  private async getAISDKTools() {
-    try {
-      const composioTools = await composioToolsHandler.getAvailableToolsInfo();
-      const aiSdkTools: Record<string, any> = {};
-
-      for (const composioTool of composioTools) {
-        if (composioTool.parameters?.properties) {
-          // Create Zod schema from Composio tool parameters
-          const schemaProps: Record<string, any> = {};
-
-          for (const [propName, propDef] of Object.entries(composioTool.parameters.properties)) {
-            const def = propDef as any;
-            switch (def.type) {
-              case 'string':
-                schemaProps[propName] = z.string().describe(def.description || '');
-                break;
-              case 'number':
-                schemaProps[propName] = z.number().describe(def.description || '');
-                break;
-              case 'boolean':
-                schemaProps[propName] = z.boolean().describe(def.description || '');
-                break;
-              case 'array':
-                schemaProps[propName] = z.array(z.any()).describe(def.description || '');
-                break;
-              default:
-                schemaProps[propName] = z.any().describe(def.description || '');
-            }
-
-            // Handle required fields
-            if (!composioTool.parameters.required?.includes(propName)) {
-              schemaProps[propName] = schemaProps[propName].optional();
-            }
-          }
-
-          const toolSchema = z.object(schemaProps);
-
-          aiSdkTools[composioTool.name] = tool({
-            description: composioTool.description || `Execute ${composioTool.name}`,
-            parameters: toolSchema,
-            execute: async (args: any) => {
-              console.log(`🔧 Executing Composio tool: ${composioTool.name}`, args);
-
-              try {
-                const result = await composioToolsHandler.executeTool(composioTool.name, args);
-                return JSON.stringify({
-                  success: result.success,
-                  data: result.data,
-                  error: result.error,
-                });
-              } catch (error) {
-                console.error(`❌ Tool execution error for ${composioTool.name}:`, error);
-                return JSON.stringify({
-                  success: false,
-                  error: error instanceof Error ? error.message : 'Unknown error',
-                });
-              }
-            },
-          } as any);
-        }
-      }
-
-      return aiSdkTools;
-    } catch (error) {
-      console.warn('⚠️ Failed to load Composio tools for AI SDK:', error);
-      return {};
-    }
-  }
-
   /**
    * Generate text with optional tool support
    */
@@ -212,29 +143,31 @@ export class AISDKClient {
       temperature?: number;
       maxTokens?: number;
       enableTools?: boolean;
-      maxToolIterations?: number;
     } = {}
   ): Promise<AIResponse> {
     await this.initialize();
 
     const {
-      model = this.config.model || 'anthropic/claude-3-7-sonnet-latest',
+      model = this.config.model || 'gpt-4o',
       temperature = this.config.temperature || 0.7,
-      maxTokens = this.config.maxTokens || 2048,
-      enableTools = this.config.enableTools ?? true,
-      maxToolIterations = this.config.maxToolIterations || 3,
+      // maxTokens = this.config.maxTokens || 2048,
+      enableTools = true,
     } = options;
 
     try {
       const apiKey = await this.getApiKey();
-      const baseUrl = this.config.baseUrl || this.defaultBaseUrl;
       
-      // Get tools if enabled
-      let aiSdkTools: Record<string, any> = {};
-      if (enableTools) {
-        aiSdkTools = await this.getAISDKTools();
-        console.log(`🔧 Using ${Object.keys(aiSdkTools).length} tools for AI SDK generation`);
-      }
+      // Always read fresh from settings to ensure latest baseURL is used
+      const settings = await storage.getSettings();
+      const apiUrl = settings.apiUrl || this.defaultBaseUrl;
+      
+      // For AI SDK, append /api/v1/ to the base URL
+      const baseUrlWithoutTrailingSlash = apiUrl.replace(/\/$/, '');
+      const baseUrl = baseUrlWithoutTrailingSlash.endsWith('/api/v1')
+        ? baseUrlWithoutTrailingSlash
+        : `${baseUrlWithoutTrailingSlash}/api/v1`;
+      
+      console.log('🌐 Using baseURL:', baseUrl);
 
       // Create OpenAI provider with custom base URL using createOpenAI
       // This creates a callable provider function that accepts model names
@@ -244,37 +177,107 @@ export class AISDKClient {
       });
 
       // Call the provider function with the model name to get the language model
-      const languageModel = openaiProvider.chat(model || 'anthropic/claude-3-7-sonnet-latest');
+      const languageModel = openaiProvider.chat(model || 'gpt-4o');
 
-      // Use AI SDK generateText with tools
-      const result = await generateText({
-        model: languageModel,
-        messages: messages
-          .filter(msg => msg.role !== 'tool') // Filter out tool messages for AI SDK
-          .map(msg => ({
-            role: msg.role as 'user' | 'assistant' | 'system',
+      // Prepare messages for AI SDK
+      const conversationMessages = messages.map(msg => {
+        if (msg.role === 'tool' && msg.tool_call_id) {
+          return {
+            role: 'tool' as const,
             content: msg.content,
-          })),
-        tools: Object.keys(aiSdkTools).length > 0 ? aiSdkTools : undefined,
-        maxToolRoundtrips: enableTools ? maxToolIterations : undefined,
-        temperature,
-        maxTokens,
-      } as any);
-
-      console.log('🎯 AI SDK result:', {
-        text: result.text.slice(0, 100) + '...',
-        usage: result.usage,
-        toolCalls: result.toolCalls?.length || 0,
-        toolResults: result.toolResults?.length || 0,
+            toolCallId: msg.tool_call_id,
+          };
+        }
+        return {
+          role: msg.role,
+          content: msg.content,
+        };
       });
 
+      // Generate response with tools
+      let finalResult: any;
+      let finalResponse = '';
+      let finalUsage: any = undefined;
+      const toolExecutions: ToolExecution[] = [];
+      const tools: Record<string, any> = {};
+
+      if (enableTools) {
+        // Get Zod schemas directly from providers
+        const zodSchemas = toolRegistry.getZodSchemasForAI();
+        console.log(`🔧 Tools enabled: ${enableTools}, Found ${zodSchemas.size} tools`);
+
+        // Create tools using Zod schemas directly
+        for (const [toolName, { description, schema }] of zodSchemas.entries()) {
+          tools[toolName] = tool({
+            description,
+            inputSchema: schema,
+            execute: async (args: Record<string, any>) => {
+              const startTime = Date.now();
+              try {
+                const result = await toolRegistry.executeTool(toolName, args);
+                const executionTime = Date.now() - startTime;
+                
+                toolExecutions.push({
+                  toolName,
+                  args,
+                  success: result.success,
+                  executionTime,
+                  error: result.error,
+                });
+                
+                return result.success ? result.result : { error: result.error };
+              } catch (error: any) {
+                const executionTime = Date.now() - startTime;
+                toolExecutions.push({
+                  toolName,
+                  args,
+                  success: false,
+                  executionTime,
+                  error: error.message || 'Unknown error',
+                });
+                return { error: error.message || 'Unknown error' };
+              }
+            },
+          });
+        }
+      }
+
+      if (Object.keys(tools).length > 0) {
+        finalResult = await generateText({
+          model: languageModel,
+          messages: conversationMessages as any,
+          tools,
+          temperature,
+          stopWhen: stepCountIs(5),
+        } as any);
+        
+        finalResponse = finalResult.text || '';
+        finalUsage = finalResult.usage;
+      } else {
+        // No tools - simple generation
+        finalResult = await generateText({
+          model: languageModel,
+          messages: conversationMessages as any,
+          temperature,
+        });
+        finalResponse = finalResult.text || '';
+        finalUsage = finalResult.usage;
+      }
+
+      if (!finalResponse || finalResponse.trim() === '') {
+        finalResponse = toolExecutions.length > 0
+          ? `I executed ${toolExecutions.length} tool(s) but did not receive a final response.`
+          : 'I apologize, but I could not generate a response.';
+      }
+
       return {
-        content: result.text,
-        usage: result.usage ? {
-          prompt_tokens: (result.usage as any).promptTokens || 0,
-          completion_tokens: (result.usage as any).completionTokens || 0,
-          total_tokens: ((result.usage as any).promptTokens || 0) + ((result.usage as any).completionTokens || 0),
+        content: finalResponse,
+        usage: finalUsage ? {
+          prompt_tokens: (finalUsage as any).promptTokens || 0,
+          completion_tokens: (finalUsage as any).completionTokens || 0,
+          total_tokens: ((finalUsage as any).promptTokens || 0) + ((finalUsage as any).completionTokens || 0),
         } : undefined,
+        toolExecutions: toolExecutions.length > 0 ? toolExecutions : undefined,
       };
     } catch (error) {
       console.error('AI SDK generation error:', error);
@@ -283,7 +286,7 @@ export class AISDKClient {
   }
 
   /**
-   * Stream text with optional tool support
+   * Stream text
    */
   async stream(
     messages: AIMessage[],
@@ -291,30 +294,30 @@ export class AISDKClient {
       model?: string;
       temperature?: number;
       maxTokens?: number;
-      enableTools?: boolean;
-      maxToolIterations?: number;
     } = {}
   ): Promise<AsyncIterable<string>> {
     await this.initialize();
 
     const {
-      model = this.config.model || 'anthropic/claude-3-7-sonnet-latest',
+      model = this.config.model || 'gpt-4o',
       temperature = this.config.temperature || 0.7,
       maxTokens = this.config.maxTokens || 2048,
-      enableTools = this.config.enableTools ?? true,
-      maxToolIterations = this.config.maxToolIterations || 3,
     } = options;
 
     try {
       const apiKey = await this.getApiKey();
-      const baseUrl = this.config.baseUrl || this.defaultBaseUrl;
       
-      // Get tools if enabled
-      let aiSdkTools: Record<string, any> = {};
-      if (enableTools) {
-        aiSdkTools = await this.getAISDKTools();
-        console.log(`🔧 Using ${Object.keys(aiSdkTools).length} tools for AI SDK streaming`);
-      }
+      // Always read fresh from settings to ensure latest baseURL is used
+      const settings = await storage.getSettings();
+      const apiUrl = settings.apiUrl || this.defaultBaseUrl;
+      
+      // For AI SDK, append /api/v1/ to the base URL
+      const baseUrlWithoutTrailingSlash = apiUrl.replace(/\/$/, '');
+      const baseUrl = baseUrlWithoutTrailingSlash.endsWith('/api/v1')
+        ? baseUrlWithoutTrailingSlash
+        : `${baseUrlWithoutTrailingSlash}/api/v1`;
+      
+      console.log('🌐 Using baseURL (stream):', baseUrl);
 
       // Create OpenAI provider with custom base URL using createOpenAI
       // This creates a callable provider function that accepts model names
@@ -324,9 +327,9 @@ export class AISDKClient {
       });
 
       // Call the provider function with the model name to get the language model
-      const languageModel = openaiProvider.chat(model || 'anthropic/claude-3-7-sonnet-latest');
+      const languageModel = openaiProvider.chat(model || 'gpt-4o');
 
-      // Use AI SDK streamText with tools
+      // Use AI SDK streamText
       const result = await streamText({
         model: languageModel,
         messages: messages
@@ -335,8 +338,6 @@ export class AISDKClient {
             role: msg.role as 'user' | 'assistant' | 'system',
             content: msg.content,
           })),
-        tools: Object.keys(aiSdkTools).length > 0 ? aiSdkTools : undefined,
-        maxToolRoundtrips: enableTools ? maxToolIterations : undefined,
         temperature,
         maxTokens,
       } as any);
