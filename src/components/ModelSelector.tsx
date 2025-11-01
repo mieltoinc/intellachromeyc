@@ -14,10 +14,10 @@ export interface ModelOption {
 
 export const AVAILABLE_MODELS: ModelOption[] = [
   // OpenAI Models
+  { provider: 'openai', id: 'gpt-5', name: 'GPT-5' },
   { provider: 'openai', id: 'gpt-4o', name: 'GPT-4o' },
   { provider: 'openai', id: 'gpt-4-turbo', name: 'GPT-4 Turbo' },
   { provider: 'openai', id: 'gpt-4', name: 'GPT-4' },
-  { provider: 'openai', id: 'gpt-3.5-turbo', name: 'GPT-3.5 Turbo' },
   
   // Anthropic Models
   { provider: 'anthropic', id: 'claude-3-5-sonnet-20241022', name: 'Claude 3.5 Sonnet' },

@@ -3,7 +3,7 @@
  * Uses api.mielto.com (appends /api/v1 automatically) as the base URL
  */
 
-import { generateText, streamText, tool, stepCountIs } from 'ai';
+import { streamText, tool, stepCountIs } from 'ai';
 import { createOpenAI } from '@ai-sdk/openai';
 import { storage } from './storage';
 import { mieltoAuth } from '@/lib/auth';
@@ -195,7 +195,6 @@ export class AISDKClient {
       });
 
       // Generate response with tools
-      let finalResult: any;
       let finalResponse = '';
       let finalUsage: any = undefined;
       const toolExecutions: ToolExecution[] = [];
@@ -242,28 +241,50 @@ export class AISDKClient {
         }
       }
 
+      // Use streamText instead of generateText
+      let streamResult: any;
       if (Object.keys(tools).length > 0) {
-        finalResult = await generateText({
+        streamResult = streamText({
           model: languageModel,
           messages: conversationMessages as any,
           tools,
           temperature,
           stopWhen: stepCountIs(5),
         } as any);
-        
-        finalResponse = finalResult.text || '';
-        finalUsage = finalResult.usage;
       } else {
         // No tools - simple generation
-        finalResult = await generateText({
+        streamResult = streamText({
           model: languageModel,
           messages: conversationMessages as any,
           temperature,
         });
-        finalResponse = finalResult.text || '';
-        finalUsage = finalResult.usage;
       }
 
+      // Collect streamed text chunks
+      for await (const textChunk of streamResult.textStream) {
+        finalResponse += textChunk;
+      }
+
+      // Get final text and usage from stream result (these are Promises)
+      try {
+        // Try to get the full text if available (some SDK versions provide this)
+        const fullText = await streamResult.text;
+        if (fullText && fullText.trim()) {
+          finalResponse = fullText;
+        }
+      } catch (e) {
+        // text property might not exist, use accumulated response
+        console.log('streamResult.text not available, using accumulated text');
+      }
+
+      // Get usage stats
+      try {
+        finalUsage = await streamResult.usage;
+      } catch (e) {
+        console.log('Could not get usage stats from stream result');
+      }
+
+      // Fallback if no response was generated
       if (!finalResponse || finalResponse.trim() === '') {
         finalResponse = toolExecutions.length > 0
           ? `I executed ${toolExecutions.length} tool(s) but did not receive a final response.`
