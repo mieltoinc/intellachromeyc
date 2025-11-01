@@ -1,4 +1,5 @@
 import TurndownService from 'turndown'
+import HalloweenContentTheme from './HalloweenContentTheme'
 
 
 /**
@@ -632,6 +633,7 @@ class ContentScript {
   private pageAnalyzed = false;
   private floatingSearchBar: FloatingSearchBar | null = null;
   private sidepanelToggle: FloatingSidepanelToggle | null = null;
+  private halloweenTheme: HalloweenContentTheme | null = null;
 
   constructor() {
     this.initialize();
@@ -654,6 +656,9 @@ class ContentScript {
     
     // Initialize sidepanel toggle button
     await this.initializeSidepanelToggle();
+    
+    // Initialize Halloween theme
+    await this.initializeHalloweenTheme();
   }
 
   private async initializeFloatingSearchBar() {
@@ -704,6 +709,35 @@ class ContentScript {
       console.log('✅ Sidepanel toggle created');
     } catch (error) {
       console.error('💥 Error initializing sidepanel toggle:', error);
+    }
+  }
+
+  private async initializeHalloweenTheme() {
+    try {
+      console.log('🎃 initializeHalloweenTheme() called');
+      
+      // Get settings to check if Halloween theme is enabled
+      const settingsResponse = await chrome.runtime.sendMessage({
+        type: MessageType.GET_SETTINGS,
+      });
+
+      if (settingsResponse.success) {
+        const settings = settingsResponse.data;
+        console.log('🎃 Halloween theme enabled?', settings.ui?.halloweenThemeEnabled);
+        
+        if (settings.ui?.halloweenThemeEnabled) {
+          console.log('✅ Halloween theme is enabled, creating component...');
+          this.halloweenTheme = new HalloweenContentTheme();
+          this.halloweenTheme.setEnabled(true);
+          console.log('✅ Halloween theme created and enabled');
+        } else {
+          console.log('❌ Halloween theme disabled in settings');
+        }
+      } else {
+        console.error('❌ Failed to get settings for Halloween theme:', settingsResponse.error);
+      }
+    } catch (error) {
+      console.error('💥 Error initializing Halloween theme:', error);
     }
   }
 

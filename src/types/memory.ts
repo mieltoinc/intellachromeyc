@@ -61,6 +61,7 @@ export interface UserSettings {
     theme?: 'light' | 'dark' | 'system';
     floatingSearchEnabled: boolean;
     floatingSearchPosition: 'bottom-right' | 'bottom-left';
+    halloweenThemeEnabled?: boolean;
   };
   
   
@@ -116,6 +117,7 @@ export const DEFAULT_SETTINGS: UserSettings = {
     theme: 'system',
     floatingSearchEnabled: true, // Temporarily enabled for testing
     floatingSearchPosition: 'bottom-right',
+    halloweenThemeEnabled: false,
   },
   
   // Moss Integration Settings
