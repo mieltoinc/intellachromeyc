@@ -11,6 +11,9 @@ importers:
       '@inferedge/moss':
         specifier: ^1.0.0-beta.1
         version: 1.0.0-beta.1
+      '@mastra/client-js':
+        specifier: ^0.16.8
+        version: 0.16.8(openapi-types@12.1.3)(react@18.3.1)(zod@4.1.12)
       '@mastra/core':
         specifier: ^0.23.3
         version: 0.23.3(openapi-types@12.1.3)(react@18.3.1)(zod@4.1.12)
@@ -38,9 +41,6 @@ importers:
       lucide-react:
         specifier: ^0.294.0
         version: 0.294.0(react@18.3.1)
-      mastra:
-        specifier: ^0.17.7
-        version: 0.17.7(@mastra/core@0.23.3(openapi-types@12.1.3)(react@18.3.1)(zod@4.1.12))(@opentelemetry/api@1.9.0)(typescript@5.9.3)(zod@4.1.12)
       react:
         specifier: ^18.2.0
         version: 18.3.1
@@ -53,6 +53,9 @@ importers:
       turndown:
         specifier: ^7.2.2
         version: 7.2.2
+      zod:
+        specifier: ^4
+        version: 4.1.12
     devDependencies:
       '@types/chrome':
         specifier: ^0.0.254
@@ -72,6 +75,9 @@ importers:
       autoprefixer:
         specifier: ^10.4.16
         version: 10.4.21(postcss@8.5.6)
+      mastra:
+        specifier: ^0.17.7
+        version: 0.17.7(@mastra/core@0.23.3(openapi-types@12.1.3)(react@18.3.1)(zod@4.1.12))(@opentelemetry/api@1.9.0)(typescript@5.9.3)(zod@4.1.12)
       postcss:
         specifier: ^8.4.32
         version: 8.5.6
@@ -79,7 +85,7 @@ importers:
         specifier: ^3.3.6
         version: 3.4.18(yaml@2.8.1)
       typescript:
-        specifier: ^5.3.3
+        specifier: ^5.9.3
         version: 5.9.3
       vite:
         specifier: ^5.0.8
@@ -820,6 +826,19 @@ packages:
 
   '@jsdevtools/ono@7.1.3':
     resolution: {integrity: sha512-4JQNk+3mVzK3xh2rqd6RB4J46qUR19azEHBneZyTZM+c456qOrbbM/5xcR8huNCCcbVt7+UmizG6GuUvPvKUYg==}
+
+  '@lukeed/csprng@1.1.0':
+    resolution: {integrity: sha512-Z7C/xXCiGWsg0KuKsHTKJxbWhpI3Vs5GwLfOean7MGyVFGqdRgBbAjOCh6u4bbjPc/8MJ2pZmK/0DLdCbivLDA==}
+    engines: {node: '>=8'}
+
+  '@lukeed/uuid@2.0.1':
+    resolution: {integrity: sha512-qC72D4+CDdjGqJvkFMMEAtancHUQ7/d/tAiHf64z8MopFDmcrtbcJuerDtFceuAfQJ2pDSfCKCtbqoGBNnwg0w==}
+    engines: {node: '>=8'}
+
+  '@mastra/client-js@0.16.8':
+    resolution: {integrity: sha512-8YUiw+i0D52znwUI8CDeY7MkQum+nT5FxPcCorq8VP7u4xcF09do1aa5OFQZVEkok7SIhJzCJTiAI2B4NEczDQ==}
+    peerDependencies:
+      zod: ^3.25.0 || ^4.0.0
 
   '@mastra/core@0.23.3':
     resolution: {integrity: sha512-5AqzE19M03T7If9ea0xjj3wr/i9MGeazdK7wbFrrJz44GnYGoSy179KYsyciXzpgXCxuWFi0ytg1jFSry/UCIQ==}
@@ -3234,6 +3253,9 @@ packages:
   run-parallel@1.2.0:
     resolution: {integrity: sha512-5l4VyZR86LZ/lDxZTR6jqL8AFE2S0IFLMP26AbjsLVADxHdhB/c0GUsH+y39UfCi3dzz8OlQuPmnaJOMoDHQBA==}
 
+  rxjs@7.8.1:
+    resolution: {integrity: sha512-AA3TVj+0A2iuIoQkWEK/tqFjBq2j+6PO6Y0zJcvzLAFhEFIO3HL0vls9hWLncZbAAbK0mar7oZ4V079I/qPMxg==}
+
   safe-buffer@5.2.1:
     resolution: {integrity: sha512-rp3So07KcdmmKbGvgaNxQSJr7bGVSVk5S9Eq1F+ppbRo70+YeaDxkw5Dd8NPN+GD6bjnYm2VuPuCXmpuYvmCXQ==}
 
@@ -3774,7 +3796,7 @@ snapshots:
 
   '@babel/helper-annotate-as-pure@7.27.3':
     dependencies:
-      '@babel/types': 7.28.4
+      '@babel/types': 7.28.5
 
   '@babel/helper-compilation-targets@7.27.2':
     dependencies:
@@ -3824,7 +3846,7 @@ snapshots:
 
   '@babel/helper-optimise-call-expression@7.27.1':
     dependencies:
-      '@babel/types': 7.28.4
+      '@babel/types': 7.28.5
 
   '@babel/helper-plugin-utils@7.27.1': {}
 
@@ -3839,8 +3861,8 @@ snapshots:
 
   '@babel/helper-skip-transparent-expression-wrappers@7.27.1':
     dependencies:
-      '@babel/traverse': 7.28.4
-      '@babel/types': 7.28.4
+      '@babel/traverse': 7.28.5
+      '@babel/types': 7.28.5
     transitivePeerDependencies:
       - supports-color
 
@@ -4278,6 +4300,38 @@ snapshots:
   '@js-sdsl/ordered-map@4.4.2': {}
 
   '@jsdevtools/ono@7.1.3': {}
+
+  '@lukeed/csprng@1.1.0': {}
+
+  '@lukeed/uuid@2.0.1':
+    dependencies:
+      '@lukeed/csprng': 1.1.0
+
+  '@mastra/client-js@0.16.8(openapi-types@12.1.3)(react@18.3.1)(zod@4.1.12)':
+    dependencies:
+      '@ai-sdk/ui-utils': 1.2.11(zod@4.1.12)
+      '@lukeed/uuid': 2.0.1
+      '@mastra/core': 0.23.3(openapi-types@12.1.3)(react@18.3.1)(zod@4.1.12)
+      json-schema: 0.4.0
+      rxjs: 7.8.1
+      zod: 4.1.12
+      zod-to-json-schema: 3.24.6(zod@4.1.12)
+    transitivePeerDependencies:
+      - '@hono/arktype-validator'
+      - '@hono/effect-validator'
+      - '@hono/typebox-validator'
+      - '@hono/valibot-validator'
+      - '@hono/zod-validator'
+      - '@sinclair/typebox'
+      - '@valibot/to-json-schema'
+      - arktype
+      - effect
+      - encoding
+      - openapi-types
+      - react
+      - supports-color
+      - valibot
+      - zod-openapi
 
   '@mastra/core@0.23.3(openapi-types@12.1.3)(react@18.3.1)(zod@4.1.12)':
     dependencies:
@@ -6961,6 +7015,10 @@ snapshots:
   run-parallel@1.2.0:
     dependencies:
       queue-microtask: 1.2.3
+
+  rxjs@7.8.1:
+    dependencies:
+      tslib: 2.8.1
 
   safe-buffer@5.2.1: {}
 
