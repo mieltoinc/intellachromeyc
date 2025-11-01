@@ -1253,7 +1253,7 @@ const SidePanelInner: React.FC = () => {
             <div className="border-t border-gray-200 dark:border-darkBg-secondary bg-white dark:bg-darkBg-primary p-2">
               {/* Context indicator */}
               <div id="current-page-context-container" className="px-2 flex items-center gap-2" style={{ width: '50%' }}>
-                <button id="current-page-context" className="flex items-center gap-2 px-3 py-2 bg-gray-100 dark:bg-darkBg-secondary hover:bg-gray-200 dark:hover:bg-darkBg-tertiary rounded-lg transition flex-1" style={{ cursor: 'pointer', width: '50%' }}>
+                <button id="current-page-context" className="flex justify-between items-center gap-2 px-2 py-1 bg-gray-100 dark:bg-darkBg-secondary hover:bg-gray-200 dark:hover:bg-darkBg-tertiary rounded-lg transition flex-1" style={{ cursor: 'pointer', width: '50%' }}>
                   {currentPageInfo.hasInfo && currentPageInfo.favicon && !faviconError ? (
                     <img 
                       src={currentPageInfo.favicon} 
