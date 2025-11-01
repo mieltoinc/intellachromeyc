@@ -902,6 +902,32 @@ const OptionsInner: React.FC = () => {
                       className="w-5 h-5 text-blue-600 rounded focus:ring-blue-500"
                     />
                   </label>
+
+                  <label className="flex items-center justify-between p-4 bg-orange-50 dark:bg-darkBg-secondary/50 rounded-lg cursor-pointer border border-orange-200 dark:border-orange-800">
+                    <div>
+                      <div className="font-medium text-gray-900 dark:text-darkText-primary flex items-center gap-2">
+                        🎃 Halloween Theme
+                        <span className="text-xs bg-orange-100 dark:bg-orange-900 text-orange-600 dark:text-orange-300 px-2 py-1 rounded-full">
+                          Seasonal
+                        </span>
+                      </div>
+                      <div className="text-sm text-gray-500 dark:text-darkText-tertiary">
+                        Add spooky spider webs and friendly floating ghosts to websites
+                      </div>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={settings.ui?.halloweenThemeEnabled ?? false}
+                      onChange={(e) => setSettings({ 
+                        ...settings, 
+                        ui: { 
+                          ...settings.ui, 
+                          halloweenThemeEnabled: e.target.checked 
+                        } 
+                      })}
+                      className="w-5 h-5 text-orange-600 rounded focus:ring-orange-500"
+                    />
+                  </label>
                 </div>
               </div>
 
