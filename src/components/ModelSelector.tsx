@@ -85,7 +85,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
             className="fixed inset-0 z-10"
             onClick={() => setIsOpen(false)}
           />
-          <div className="absolute top-full right-0 mt-2 z-20 bg-white dark:bg-darkBg-primary border border-gray-200 dark:border-darkBg-secondary rounded-lg shadow-lg max-h-80 overflow-auto min-w-[200px]">
+          <div className="absolute top-full left-0 right-0 mb-2 z-20 bg-white dark:bg-darkBg-primary border border-gray-200 dark:border-darkBg-secondary rounded-lg shadow-lg max-h-80 overflow-auto min-w-[200px]">
             {Object.entries(groupedModels).map(([provider, models]) => (
               <div key={provider} className="border-b border-gray-200 dark:border-darkBg-secondary last:border-b-0">
                 <div className="px-3 py-2 text-xs font-semibold text-gray-500 dark:text-darkText-tertiary bg-gray-50 dark:bg-darkBg-secondary sticky top-0">
