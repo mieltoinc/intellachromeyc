@@ -1,10 +1,12 @@
 /**
- * Mastra Client for Intella - Handles both LLM calls and Mielto API calls through Mastra
+ * Mastra Client for Intella - Orchestrates Mastra AI Agent and Mielto API operations
  */
 
+import { MastraHandler, type MastraMessage } from './mastra-handler';
+import { MieltoHandler } from './mielto-handler';
+import { Memory } from '@/types/memory';
 import { storage } from './storage';
 import { mieltoAuth } from '@/lib/auth';
-import { Memory } from '@/types/memory';
 
 export interface MastraClientConfig {
   baseUrl?: string;
@@ -28,6 +30,13 @@ export interface MastraResponse {
 
 class MastraClient {
   private config: MastraClientConfig = {};
+  private mastraHandler: MastraHandler;
+  private mieltoHandler: MieltoHandler;
+
+  constructor() {
+    this.mastraHandler = new MastraHandler();
+    this.mieltoHandler = new MieltoHandler();
+  }
 
   async initialize() {
     const settings = await storage.getSettings();
@@ -36,101 +45,99 @@ class MastraClient {
       apiKey: settings.apiKey || '',
       workspace_id: settings.workspace_id || '',
     };
+    
+    // Initialize both handlers
+    await Promise.all([
+      this.initializeMastraHandler(),
+      this.initializeMieltoHandler()
+    ]);
   }
 
-  private async getMieltoHeaders(): Promise<Record<string, string>> {
-    await this.initialize();
-    
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      'x-memories-enabled': 'true', // Enable memory context in Mielto
-    };
-
-    // Get session data for user and workspace context
-    const session = await mieltoAuth.getCurrentSession();
-    
-    if (session?.user?.id) {
-      headers['x-user-id'] = session.user.id.toString();
-    }
-
-    if (session?.workspace?.id) {
-      headers['X-Workspace-Id'] = session.workspace.id;
-    } else if (this.config.workspace_id) {
-      headers['X-Workspace-Id'] = this.config.workspace_id;
-    }
-
-    // Add collection IDs for memory context
+  private async initializeMastraHandler() {
     try {
-      const collectionId = await storage.getCollectionId();
-      if (collectionId) {
-        headers['x-collection-ids'] = JSON.stringify([collectionId]);
-      }
+      // Configure Mastra handler to use Mielto server endpoint
+      this.mastraHandler.updateConfig({
+        baseUrl: this.config.baseUrl, // This should point to your Mielto/Mastra server
+        agentName: 'intella-assistant', // Name of the agent on the server
+        headers: {
+          'X-Workspace-Id': this.config.workspace_id || '',
+          'X-API-Key': this.config.apiKey || '',
+          'x-memories-enabled': 'true',
+        },
+        retries: 3,
+        backoffMs: 300,
+        maxBackoffMs: 5000,
+      });
+      
+      await this.mastraHandler.initialize();
+      console.log('✅ Mastra Handler initialized with Mielto server');
     } catch (error) {
-      console.warn('Could not get collection ID for Mastra client:', error);
+      console.error('❌ Failed to initialize Mastra Handler:', error);
     }
-
-    return headers;
   }
+
+  private async initializeMieltoHandler() {
+    try {
+      this.mieltoHandler.updateConfig({
+        baseUrl: this.config.baseUrl,
+        apiKey: this.config.apiKey,
+        workspace_id: this.config.workspace_id,
+      });
+      
+      await this.mieltoHandler.initialize();
+      console.log('✅ Mielto Handler initialized successfully');
+    } catch (error) {
+      console.error('❌ Failed to initialize Mielto Handler:', error);
+    }
+  }
+
 
   /**
-   * Chat with Mielto through custom API call (with memory context)
-   * For now, we'll call Mielto directly until we figure out the proper Mastra API
+   * Chat with memories - Uses Mastra Agent which calls Mielto completions endpoint
    */
   async chatWithMemories(messages: ChatMessage[]): Promise<MastraResponse> {
     await this.initialize();
 
+    if (!this.mastraHandler.isAgentReady()) {
+      throw new Error('Mastra Agent not ready. Check Mielto endpoint configuration.');
+    }
+
     try {
-      const headers = await this.getMieltoHeaders();
+      const mastraMessages: MastraMessage[] = messages.map(msg => ({
+        role: msg.role,
+        content: msg.content,
+      }));
       
-      const requestBody = {
-        model: 'gpt-4o',
-        temperature: 0.7,
-        max_tokens: 2048,
-        stream: false,
-        messages: messages.map(msg => ({
-          role: msg.role,
-          content: msg.content
-        })),
-      };
-
-      const response = await fetch(`${this.config.baseUrl}/api/v1/chat/completions`, {
-        method: 'POST',
-        headers: {
-          ...headers,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(requestBody),
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`API error: ${response.statusText} - ${errorText}`);
-      }
-
-      const result = await response.json();
-      const content = result.choices?.[0]?.message?.content || '';
-
-      return {
-        content,
-        usage: result.usage ? {
-          prompt_tokens: result.usage.prompt_tokens || 0,
-          completion_tokens: result.usage.completion_tokens || 0,
-          total_tokens: result.usage.total_tokens || 0,
-        } : undefined,
-      };
+      return await this.mastraHandler.generate(mastraMessages);
     } catch (error) {
-      console.error('Mastra chat error:', error);
-      throw new Error(`Mastra chat failed: ${error}`);
+      console.error('Mastra Agent (via Mielto) failed:', error);
+      throw new Error(`Chat failed: ${error}`);
     }
   }
 
   /**
-   * Stream chat with Mielto (placeholder for future implementation)
+   * Stream chat with memories - Uses Mastra Agent which streams from Mielto endpoint
    */
   async streamChatWithMemories(messages: ChatMessage[]): Promise<AsyncIterable<string>> {
-    // For now, fallback to regular chat and simulate streaming
-    const response = await this.chatWithMemories(messages);
-    return this.simulateStream(response.content);
+    await this.initialize();
+
+    if (!this.mastraHandler.isAgentReady()) {
+      throw new Error('Mastra Agent not ready. Check Mielto endpoint configuration.');
+    }
+
+    try {
+      const mastraMessages: MastraMessage[] = messages.map(msg => ({
+        role: msg.role,
+        content: msg.content,
+      }));
+      
+      return await this.mastraHandler.stream(mastraMessages);
+    } catch (error) {
+      console.error('Mastra Agent streaming (via Mielto) failed:', error);
+      // Fallback to regular chat and simulate streaming
+      const response = await this.chatWithMemories(messages);
+      return this.simulateStream(response.content);
+    }
   }
 
   private async* simulateStream(content: string): AsyncIterable<string> {
@@ -285,8 +292,31 @@ Focus on extracting the most important information that would be useful for futu
   }
 
   /**
-   * Use Mastra interface to call LLMs through Mielto
-   * For now, routes through Mielto backend - future versions can support multiple providers
+   * Check if Mastra Agent is properly initialized
+   */
+  isAgentInitialized(): boolean {
+    return this.mastraHandler.isAgentReady();
+  }
+
+  /**
+   * Check if Mielto handler is ready for memory operations
+   */
+  isMieltoReady(): boolean {
+    return this.mieltoHandler.isReady();
+  }
+
+  /**
+   * Get status of both handlers
+   */
+  getHandlerStatus(): { mastra: boolean; mielto: boolean } {
+    return {
+      mastra: this.mastraHandler.isAgentReady(),
+      mielto: this.mieltoHandler.isReady(),
+    };
+  }
+
+  /**
+   * Use Mastra Agent to call LLMs (via Mielto endpoint) with provider options
    */
   async callLLM(
     messages: ChatMessage[],
@@ -297,8 +327,26 @@ Focus on extracting the most important information that would be useful for futu
       maxTokens?: number;
     } = {}
   ): Promise<MastraResponse> {
-    // For now, all providers route through Mielto
-    return await this.chatWithMemories(messages);
+    await this.initialize();
+    
+    if (!this.mastraHandler.isAgentReady()) {
+      throw new Error('Mastra Agent not ready. Check Mielto endpoint configuration.');
+    }
+
+    try {
+      // Note: Client SDK doesn't expose temperature/maxTokens configuration
+      // These would be configured on the server-side agent
+
+      const mastraMessages: MastraMessage[] = messages.map(msg => ({
+        role: msg.role,
+        content: msg.content,
+      }));
+
+      return await this.mastraHandler.generate(mastraMessages);
+    } catch (error) {
+      console.error('Mastra Agent LLM call error:', error);
+      throw new Error(`LLM call failed: ${error}`);
+    }
   }
 
   /**
@@ -313,8 +361,12 @@ Focus on extracting the most important information that would be useful for futu
    */
   async updateConfig(newConfig: Partial<MastraClientConfig>): Promise<void> {
     this.config = { ...this.config, ...newConfig };
-    // Reinitialize agent with new config
-    await this.initialize();
+    // Reinitialize both handlers with new config
+    await Promise.all([
+      this.initialize(),
+      this.initializeMastraHandler(),
+      this.initializeMieltoHandler()
+    ]);
   }
 
   /**
@@ -425,19 +477,8 @@ ${entities.topics && entities.topics.length > 0 ? `\nTopics: ${entities.topics.j
    * Search memories in Mielto backend
    */
   async searchMemoriesInBackend(query: string): Promise<any[]> {
-    const headers = await this.getMieltoAPIHeaders();
-    
-    const response = await fetch(
-      `${this.config.baseUrl}/api/v1/contents?search=${encodeURIComponent(query)}`,
-      { headers }
-    );
-
-    if (!response.ok) {
-      throw new Error(`Failed to search memories: ${response.statusText}`);
-    }
-
-    const result = await response.json();
-    return result.data || [];
+    await this.initialize();
+    return await this.mieltoHandler.searchMemories(query);
   }
 
   /**
