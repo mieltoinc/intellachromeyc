@@ -167,7 +167,7 @@ class HalloweenContentTheme {
       this.createFloatingGhost();
     }, 5000);
     
-    this.intervals.push(interval);
+    this.intervals.push(interval as unknown as number);
   }
 
   private createFloatingGhost(): void {

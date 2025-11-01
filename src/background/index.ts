@@ -12,6 +12,7 @@ import { mossClient } from '@/utils/moss-client';
 import { toolRegistry } from '@/utils/tool-registry';
 import { MemoryToolsProvider } from '@/utils/providers/memory-tools-provider';
 import { BrowserToolsProvider } from '@/utils/providers/browser-tools-provider';
+import { ComposioToolsProvider } from '@/utils/providers/composio-tools-provider';
 
 // Initialize tool providers and Moss client on browser startup
 chrome.runtime.onStartup.addListener(async () => {
@@ -20,6 +21,7 @@ chrome.runtime.onStartup.addListener(async () => {
     // Initialize tool providers
     await toolRegistry.registerProvider(new MemoryToolsProvider());
     await toolRegistry.registerProvider(new BrowserToolsProvider());
+    await toolRegistry.registerProvider(new ComposioToolsProvider());
     console.log('✅ Tool providers initialized');
   } catch (error) {
     console.warn('⚠️ Failed to initialize tool providers:', error);

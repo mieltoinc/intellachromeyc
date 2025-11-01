@@ -4,4 +4,5 @@
 
 export { BrowserToolsProvider } from './browser-tools-provider';
 export { MemoryToolsProvider } from './memory-tools-provider';
+export { ComposioToolsProvider } from './composio-tools-provider';
 
