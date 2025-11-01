@@ -13,7 +13,7 @@ class MossClientManager {
   private initialized: boolean = false;
 
   /**
-   * Initialize Moss client with credentials from settings
+   * Initialize Moss client with credentials from settings or environment variables
    */
   async initialize(): Promise<void> {
     if (this.initialized && this.client) {
@@ -22,20 +22,36 @@ class MossClientManager {
 
     const settings = await storage.getSettings();
     
-    // Check if Moss is enabled
-    if (!settings.moss?.enabled) {
+    // Check if Moss is enabled (default to true if env vars are set)
+    const envProjectId = import.meta.env.VITE_MOSS_PROJECT_ID;
+    const envProjectKey = import.meta.env.VITE_MOSS_PROJECT_KEY;
+    const hasEnvCredentials = !!(envProjectId && envProjectKey);
+
+    console.log('🔍 Environment variables:', { envProjectId, envProjectKey, hasEnvCredentials });
+    
+    const mossEnabled = settings.moss?.enabled ?? hasEnvCredentials;
+    if (!mossEnabled) {
       console.log('ℹ️ Moss embedding is disabled in settings');
       this.initialized = false;
       return;
     }
     
-    const projectId = settings.moss?.projectId;
-    const projectKey = settings.moss?.projectKey;
+    // Get credentials from settings first, fallback to environment variables
+    const projectId = settings.moss?.projectId || envProjectId;
+    const projectKey = settings.moss?.projectKey || envProjectKey;
 
     if (!projectId || !projectKey) {
       console.warn('⚠️ Moss credentials not configured. Skipping Moss embedding.');
+      console.warn('   Set VITE_MOSS_PROJECT_ID and VITE_MOSS_PROJECT_KEY in .env or configure in settings');
       this.initialized = false;
       return;
+    }
+
+    // Log which source is being used (for debugging)
+    if (envProjectId && envProjectId === projectId) {
+      console.log('🔧 Using Moss credentials from environment variables');
+    } else if (settings.moss?.projectId) {
+      console.log('🔧 Using Moss credentials from user settings');
     }
 
     try {

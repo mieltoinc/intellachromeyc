@@ -133,7 +133,8 @@ export const DEFAULT_SETTINGS: UserSettings = {
   moss: {
     projectId: undefined,
     projectKey: undefined,
-    enabled: false, // Disabled by default until credentials are configured
+    // Will auto-enable if env vars (VITE_MOSS_PROJECT_ID, VITE_MOSS_PROJECT_KEY) are set
+    enabled: true,
   },
   
   // Feature 2: Upgrade to Pro
