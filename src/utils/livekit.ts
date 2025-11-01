@@ -9,6 +9,7 @@ export interface LiveKitConfig {
   wsUrl: string;
   token: string;
   apiKey?: string;
+  userId?: string;
 }
 
 export class LiveKitVoiceChat {
@@ -73,8 +74,7 @@ export class LiveKitVoiceChat {
         autoSubscribe: true,
       });
 
-      // API key is already passed through room metadata during token creation
-      console.log('🔗 Connected to LiveKit, API key passed via room metadata');
+      console.log('🔗 Connected to LiveKit with API key in participant attributes');
 
     } catch (error) {
       console.error('❌ Failed to connect to LiveKit:', error);
@@ -151,7 +151,7 @@ export class LiveKitVoiceChat {
 /**
  * Creates a LiveKit room token by calling LiveKit Cloud sandbox service
  */
-export async function createLiveKitToken(apiKey: string): Promise<{ token: string; wsUrl: string }> {
+export async function createLiveKitToken(_apiKey: string, _userId?: string): Promise<{ token: string; wsUrl: string }> {
   try {
     console.log('🔗 Creating LiveKit token using sandbox API...');
     
@@ -169,11 +169,8 @@ export async function createLiveKitToken(apiKey: string): Promise<{ token: strin
       body: JSON.stringify({
         room_name: roomName,
         participant_name: participantName,
-        room_config: {
-          // Configure room to dispatch agent with API key metadata
-          metadata: JSON.stringify({
-            api_key: apiKey
-          })
+        participant_attributes: {
+          api_key: _apiKey
         }
       }),
     });

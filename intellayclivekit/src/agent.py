@@ -1,4 +1,6 @@
 import logging
+import json
+import os
 
 from dotenv import load_dotenv
 from livekit.agents import (
@@ -13,9 +15,9 @@ from livekit.agents import (
     inference,
     metrics,
 )
-from livekit.plugins import noise_cancellation, openai, silero
+from livekit.plugins import noise_cancellation, silero, openai
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
-from livekit.plugins.llm import LLM
+# from livekit.plugins.openai.llm import LLM
 
 logger = logging.getLogger("agent")
 
@@ -59,6 +61,51 @@ async def entrypoint(ctx: JobContext):
     ctx.log_context_fields = {
         "room": ctx.room.name,
     }
+    
+    # Parse room metadata (it comes as a JSON string)
+    logger.info(f"Raw room metadata: {ctx.room.metadata}")
+    
+    # Also check for participant metadata when they join
+    # We'll set up a callback to get the API key and user ID from participant metadata
+    api_key = os.getenv("MIELTO_API_KEY") or os.getenv("OPENAI_API_KEY") or "your_api_key_here"
+    user_id = os.getenv("MIELTO_USER_ID") or "default-user"
+    
+    # Check if there are already participants in the room
+    logger.info(f"Current participants in room: {len(list(ctx.room.remote_participants))}")
+    for participant in ctx.room.remote_participants.values():
+        logger.info(f"Existing participant: {participant.identity}, attributes: {participant.attributes}")
+        if participant.attributes and participant.attributes.get("api_key"):
+            api_key = participant.attributes.get("api_key")
+            logger.info(f"Found API key in existing participant attributes: [PRESENT]")
+            break
+
+    @ctx.room.on("participant_connected")
+    def on_participant_connected(participant):
+        nonlocal api_key
+        logger.info(f"New participant connected: {participant.identity}")
+        logger.info(f"New participant attributes: {participant.attributes}")
+        
+        if participant.attributes and participant.attributes.get("api_key"):
+            api_key = participant.attributes.get("api_key")
+            logger.info(f"Found API key in new participant attributes: [PRESENT]")
+    
+    # Try to parse room metadata as backup
+    raw_metadata = ctx.room.metadata or ""
+    try:
+        metadata = json.loads(raw_metadata) if raw_metadata else {}
+        logger.info(f"Parsed room metadata: {metadata}")
+        if metadata.get("api_key") and api_key == "your_api_key_here":
+            api_key = metadata.get("api_key")
+    except json.JSONDecodeError as e:
+        logger.error(f"Failed to parse room metadata JSON: {e}")
+        metadata = {}
+    
+    logger.info(f"Using API key: {'[PRESENT]' if api_key and api_key != 'your_api_key_here' else '[MISSING]'}")
+    logger.info(f"API key starts with: {api_key[:10] if api_key and api_key != 'your_api_key_here' else 'N/A'}...")
+    logger.info(f"API key length: {len(api_key) if api_key else 0}")
+    logger.info(f"Using user ID: {user_id} (from env or default)")
+    logger.info(f"Mielto base URL: https://api.mielto.com/api/v1")
+    logger.info(f"Headers will include: X-API-Key, x-user-id, x-memories-enabled")
 
     # Set up a voice AI pipeline using OpenAI, Cartesia, AssemblyAI, and the LiveKit turn detector
     session = AgentSession(
@@ -67,10 +114,14 @@ async def entrypoint(ctx: JobContext):
         stt=inference.STT(model="assemblyai/universal-streaming", language="en"),
         # A Large Language Model (LLM) is your agent's brain, processing user input and generating a response
         # See all available models at https://docs.livekit.io/agents/models/llm/
-        llm = LLM(
-            # model="mielto-pro",  # your custom model name
+        llm=openai.LLM(
             base_url="https://api.mielto.com/api/v1",
-            api_key=ctx.room.metadata.get("api_key", "your_api_key_here"),
+            api_key=api_key,
+            extra_headers={
+                "X-API-Key": api_key,
+                "x-user-id": user_id,
+                "x-memories-enabled": "true"
+            }
         ),
         # Text-to-speech (TTS) is your agent's voice, turning the LLM's text into speech that the user can hear
         # See all available models as well as voice selections at https://docs.livekit.io/agents/models/tts/

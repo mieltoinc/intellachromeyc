@@ -858,8 +858,11 @@ const SidePanelInner: React.FC = () => {
     try {
       console.log('🎙️ Starting voice chat...');
       
-      // Create LiveKit token with API key
-      const { token, wsUrl } = await createLiveKitToken(settings.apiKey);
+      // Get user ID from settings if available
+      const userId = settings?.workspace_id || 'anonymous';
+      
+      // Create LiveKit token with API key and user ID
+      const { token, wsUrl } = await createLiveKitToken(settings.apiKey, userId);
       
       // Initialize voice chat
       const livekitClient = new LiveKitVoiceChat();
@@ -891,7 +894,8 @@ const SidePanelInner: React.FC = () => {
       await livekitClient.connect({
         wsUrl,
         token,
-        apiKey: settings.apiKey
+        apiKey: settings.apiKey,
+        userId: userId
       });
       
       // Enable microphone
