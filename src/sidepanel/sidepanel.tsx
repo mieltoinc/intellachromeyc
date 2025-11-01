@@ -5,8 +5,7 @@
 
 import React, { useState, useEffect, useRef, useReducer } from 'react';
 import ReactDOM from 'react-dom/client';
-import { Send, Search, BookOpen, Sparkles, Settings as SettingsIcon, RefreshCw, Plus, CheckCircle, AlertCircle, Loader2, Menu, Eye, EyeOff, Zap, Mic, MicOff, Phone, PhoneOff } from 'lucide-react';
-import { Send, Search, BookOpen, Sparkles, Settings as SettingsIcon, RefreshCw, Plus, CheckCircle, AlertCircle, Loader2, Menu, Eye, EyeOff, Zap, X } from 'lucide-react';
+import { Send, Search, BookOpen, Sparkles, Settings as SettingsIcon, RefreshCw, Plus, CheckCircle, AlertCircle, Loader2, Menu, Eye, EyeOff, Zap, Mic, MicOff, Phone, PhoneOff, X } from 'lucide-react';
 import { MessageType } from '@/types/messages';
 import { Memory, UserSettings } from '@/types/memory';
 import { mieltoAPI } from '@/utils/api';
