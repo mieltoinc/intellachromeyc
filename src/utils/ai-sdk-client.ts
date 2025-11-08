@@ -136,7 +136,6 @@ export class AISDKClient {
    */
   private async getApiKey(): Promise<string> {
     await this.initialize();
-    // return "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";
     const headers = await this.getHeaders();
     return headers['X-API-Key'] || headers['Authorization']?.replace(/^Bearer\s+/i, '') || 'dummy-key';
   }
