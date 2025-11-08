@@ -15,7 +15,14 @@ export interface MieltoConfig {
 
 export interface MieltoMessage {
   role: 'user' | 'assistant' | 'system' | 'tool';
-  content: string | Array<{ type: 'text' | 'image'; text?: string; image?: string }>;
+  content: string | Array<{ 
+    type: 'text' | 'image_url'; 
+    text?: string; 
+    image_url?: { 
+      url: string; 
+      detail?: 'low' | 'high' | 'auto' 
+    } 
+  }>;
   tool_calls?: any[];
   tool_call_id?: string;
 }

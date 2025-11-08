@@ -383,8 +383,8 @@ export class ToolRegistry {
   /**
    * Get Zod schemas for AI SDK
    */
-  getZodSchemasForAI(): Map<string, { description: string; schema: any }> {
-    const allSchemas = new Map<string, { description: string; schema: any }>();
+  getZodSchemasForAI(): Map<string, { description: string; schema: any; outputSchema?: any }> {
+    const allSchemas = new Map<string, { description: string; schema: any; outputSchema?: any }>();
     
     for (const provider of this.providers.values()) {
       if (provider.enabled && provider.getZodSchemas) {

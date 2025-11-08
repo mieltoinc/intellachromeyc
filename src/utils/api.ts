@@ -691,7 +691,12 @@ This content should be indexed and made searchable for future queries. Please ac
   /**
    * Ask Intella a question (memories will be automatically included by the API)
    */
-  async askIntella(question: string, context?: string, model?: string): Promise<{
+  async askIntella(
+    question: string, 
+    context?: string, 
+    model?: string,
+    conversationHistory?: Array<{ role: 'user' | 'assistant'; content: string }>
+  ): Promise<{
     content: string;
     toolExecutions?: Array<{
       toolName: string;
@@ -715,6 +720,11 @@ This content should be indexed and made searchable for future queries. Please ac
         role: 'system' as const,
         content: `Additional context from local browsing history search: ${context}`,
       }] : []),
+      // Include conversation history if provided
+      ...(conversationHistory || []).map(msg => ({
+        role: msg.role as 'user' | 'assistant',
+        content: msg.content,
+      })),
       {
         role: 'user' as const,
         content: question,
@@ -735,7 +745,13 @@ This content should be indexed and made searchable for future queries. Please ac
   /**
    * Ask Intella with screenshot (multimodal)
    */
-  async askIntellaWithScreenshot(question: string, context?: string, screenshot?: string, model?: string): Promise<{
+  async askIntellaWithScreenshot(
+    question: string, 
+    context?: string, 
+    screenshot?: string, 
+    model?: string,
+    conversationHistory?: Array<{ role: 'user' | 'assistant'; content: string }>
+  ): Promise<{
     content: string;
     toolExecutions?: Array<{
       toolName: string;
@@ -759,16 +775,45 @@ This content should be indexed and made searchable for future queries. Please ac
         role: 'system' as const,
         content: `Additional context from local browsing history search: ${context}`,
       }] : []),
+      // Include conversation history if provided
+      ...(conversationHistory || []).map(msg => ({
+        role: msg.role as 'user' | 'assistant',
+        content: msg.content,
+      })),
       {
         role: 'user' as const,
         content: screenshot 
           ? [
-              { type: 'image' as const, image: screenshot },
-              ...(question ? [{ type: 'text' as const, text: question }] : [])
+              ...(question ? [{ type: 'text' as const, text: question }] : []),
+              { 
+                type: 'image_url' as const, 
+                image_url: { 
+                  url: screenshot,
+                  detail: 'auto' as const
+                } 
+              }
             ]
           : question,
       },
     ];
+
+    // Log the message format for debugging
+    if (screenshot) {
+      const userMsg = messages[messages.length - 1];
+      console.log('📸 Screenshot message format:', {
+        role: userMsg.role,
+        contentType: Array.isArray(userMsg.content) ? 'array' : typeof userMsg.content,
+        contentLength: Array.isArray(userMsg.content) ? userMsg.content.length : 'N/A',
+        contentPreview: Array.isArray(userMsg.content) 
+          ? userMsg.content.map((part: any) => ({
+              type: part.type,
+              hasImageUrl: !!part.image_url,
+              imageUrlType: part.image_url ? typeof part.image_url.url : 'N/A',
+              imageUrlPreview: part.image_url?.url?.substring(0, 50) + '...'
+            }))
+          : 'N/A'
+      });
+    }
 
     const formattedModel = this.formatModelId(model || 'gpt-4o');
     const result = await handler.chat(messages, {

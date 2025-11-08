@@ -631,7 +631,13 @@ async function handleAnalyzePage(payload: any): Promise<MessageResponse> {
   }
 }
 
-async function handleAskIntella(payload: { question: string; context?: string; screenshot?: string; model?: string }): Promise<MessageResponse> {
+async function handleAskIntella(payload: { 
+  question: string; 
+  context?: string; 
+  screenshot?: string; 
+  model?: string;
+  conversationHistory?: Array<{ role: 'user' | 'assistant'; content: string }>;
+}): Promise<MessageResponse> {
   try {
     // Ensure tool providers are initialized (service worker may have woken up)
     try {
@@ -686,11 +692,23 @@ async function handleAskIntella(payload: { question: string; context?: string; s
         : mossContext;
     }
     console.log('🔍 Combined context:', combinedContext);
-    // Step 3: Send to Mielto with combined context
+    
+    // Step 3: Send to Mielto with combined context and conversation history
     const model = payload.model || 'gpt-4o';
     const response = payload.screenshot 
-      ? await mieltoAPI.askIntellaWithScreenshot(payload.question, combinedContext, payload.screenshot, model)
-      : await mieltoAPI.askIntella(payload.question, combinedContext, model);
+      ? await mieltoAPI.askIntellaWithScreenshot(
+          payload.question, 
+          combinedContext, 
+          payload.screenshot, 
+          model,
+          payload.conversationHistory
+        )
+      : await mieltoAPI.askIntella(
+          payload.question, 
+          combinedContext, 
+          model,
+          payload.conversationHistory
+        );
     return { 
       success: true, 
       data: response.content,
