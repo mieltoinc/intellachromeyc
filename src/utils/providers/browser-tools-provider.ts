@@ -104,6 +104,54 @@ export class BrowserToolsProvider implements ToolProvider {
       providerId: this.id,
     });
 
+    // Search for elements using various methods (requires content script proxy)
+    this.tools.set('search_element', {
+      id: 'search_element',
+      name: 'search_element',
+      description: 'Search for elements on the page using various methods: CSS selector, XPath, text content, attributes, tag name, or ARIA role. Use this tool to find elements on the page that match your search query. Should be used in conjunction with tools like click_element or extract_text or scroll_to_element to interact with the elements. Can be used as a fallback when other tools fail to find the element. Supports multiple search criteria - all criteria must match (AND logic).',
+      parameters: {
+        type: 'object',
+        properties: {
+          criteria: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                method: {
+                  type: 'string',
+                  enum: ['css', 'xpath', 'text', 'id', 'class', 'name', 'tag', 'role', 'attribute'],
+                  description: 'Search method to use: css (CSS selector), xpath (XPath expression), text (text content search), id (element ID), class (CSS class name), name (name attribute), tag (HTML tag name), role (ARIA role), or attribute (custom attribute search)',
+                  required: true,
+                },
+                query: {
+                  type: 'string',
+                  description: 'The search query/value based on the selected method. For text search, can be partial match. For attribute search, use format "attrName=attrValue"',
+                  required: true,
+                },
+              },
+            },
+            description: 'Array of search criteria. All criteria must match (AND logic). If provided, this takes precedence over single method/query parameters.',
+          },
+          method: {
+            type: 'string',
+            enum: ['css', 'xpath', 'text', 'id', 'class', 'name', 'tag', 'role', 'attribute'],
+            description: 'Single search method (for backward compatibility). Use criteria array for multiple search methods.',
+          },
+          query: {
+            type: 'string',
+            description: 'Single search query (for backward compatibility). Use criteria array for multiple search methods.',
+          },
+          limit: {
+            type: 'number',
+            description: 'Maximum number of elements to return (default: 10)',
+          },
+        },
+        required: [],
+      },
+      enabled: true,
+      providerId: this.id,
+    });
+
     // Capture screenshot of current page
     this.tools.set('capture_screenshot', {
       id: 'capture_screenshot',
@@ -119,8 +167,8 @@ export class BrowserToolsProvider implements ToolProvider {
     });
   }
 
-  getZodSchemas(): Map<string, { description: string; schema: any }> {
-    const schemas = new Map<string, { description: string; schema: any }>();
+  getZodSchemas(): Map<string, { description: string; schema: any; outputSchema?: any }> {
+    const schemas = new Map<string, { description: string; schema: any; outputSchema?: any }>();
     
     schemas.set('get_current_url', {
       description: 'Get the URL of the current active tab',
@@ -153,9 +201,25 @@ export class BrowserToolsProvider implements ToolProvider {
       }),
     });
     
+    schemas.set('search_element', {
+      description: 'Search for elements on the page using various methods: CSS selector, XPath, text content, attributes, tag name, or ARIA role. Supports multiple search criteria - all criteria must match (AND logic).',
+      schema: z.object({
+        criteria: z.array(z.object({
+          method: z.enum(['css', 'xpath', 'text', 'id', 'class', 'name', 'tag', 'role', 'attribute']).describe('Search method to use: css (CSS selector), xpath (XPath expression), text (text content search), id (element ID), class (CSS class name), name (name attribute), tag (HTML tag name), role (ARIA role), or attribute (custom attribute search)'),
+          query: z.string().describe('The search query/value based on the selected method. For text search, can be partial match. For attribute search, use format "attrName=attrValue"'),
+        })).optional().describe('Array of search criteria. All criteria must match (AND logic). If provided, this takes precedence over single method/query parameters.'),
+        method: z.enum(['css', 'xpath', 'text', 'id', 'class', 'name', 'tag', 'role', 'attribute']).optional().describe('Single search method (for backward compatibility). Use criteria array for multiple search methods.'),
+        query: z.string().optional().describe('Single search query (for backward compatibility). Use criteria array for multiple search methods.'),
+        limit: z.number().optional().describe('Maximum number of elements to return (default: 10)'),
+      }),
+    });
+    
     schemas.set('capture_screenshot', {
       description: 'Capture a screenshot of the current visible tab',
       schema: z.object({}),
+      outputSchema: z.object({
+        screenshot: z.string().describe('Data URL of the captured screenshot in format: data:image/png;base64,<base64-encoded-image-data>'),
+      }),
     });
     
     return schemas;
@@ -279,6 +343,21 @@ export class BrowserToolsProvider implements ToolProvider {
             return {
               success: false,
               error: error.message || 'Failed to extract text',
+            };
+          }
+        }
+
+        case 'search_element': {
+          try {
+            const result = await this.executeInContentScript(tabId, toolName, args);
+            return {
+              success: true,
+              result,
+            };
+          } catch (error: any) {
+            return {
+              success: false,
+              error: error.message || 'Failed to search for elements',
             };
           }
         }

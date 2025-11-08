@@ -323,6 +323,571 @@ class FloatingSidepanelToggle {
   }
 }
 
+// Speech-to-Text Floating Bar Component for Meet Pages
+class SpeechToTextOverlay {
+  private container: HTMLDivElement | null = null;
+  private floatingBar: HTMLDivElement | null = null;
+  private suggestionsPopup: HTMLDivElement | null = null;
+  private recognition: any = null;
+  private isListening = false;
+  private transcript = '';
+  private conversationHistory: string[] = [];
+  private lastAnalysisTime = 0;
+  private isAnalyzing = false;
+  private suggestions: string[] = [];
+  private showSuggestions = false;
+
+  constructor() {
+    this.initialize();
+  }
+
+  private initialize() {
+    // Check if Speech Recognition API is available
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    
+    if (!SpeechRecognition) {
+      console.warn('⚠️ Speech Recognition API not available in this browser');
+      return;
+    }
+
+    this.recognition = new SpeechRecognition();
+    this.recognition.continuous = true;
+    this.recognition.interimResults = false;
+    this.recognition.lang = 'en-US';
+
+    this.recognition.onstart = () => {
+      console.log('🎤 Speech recognition started');
+      this.isListening = true;
+    };
+
+    this.recognition.onresult = async (event: any) => {
+      let newTranscript = '';
+      
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        if (event.results[i].isFinal) {
+          newTranscript += event.results[i][0].transcript + ' ';
+        }
+      }
+      
+      if (newTranscript.trim()) {
+        this.transcript += newTranscript;
+        this.conversationHistory.push(newTranscript.trim());
+        // Keep only last 10 utterances for context
+        if (this.conversationHistory.length > 10) {
+          this.conversationHistory.shift();
+        }
+        
+        // Analyze conversation every 5 seconds or after significant utterances
+        const now = Date.now();
+        if (now - this.lastAnalysisTime > 5000 || newTranscript.length > 50) {
+          this.lastAnalysisTime = now;
+          this.analyzeConversation();
+        }
+      }
+    };
+
+    this.recognition.onerror = (event: any) => {
+      console.error('❌ Speech recognition error:', event.error);
+      if (event.error === 'no-speech') {
+        // Restart if no speech detected (normal behavior)
+        if (this.isListening) {
+          this.recognition.stop();
+          setTimeout(() => {
+            if (this.isListening) {
+              this.recognition.start();
+            }
+          }, 100);
+        }
+      } else if (event.error === 'not-allowed') {
+        this.isListening = false;
+      }
+    };
+
+    this.recognition.onend = () => {
+      // Automatically restart if we're still supposed to be listening
+      if (this.isListening) {
+        setTimeout(() => {
+          if (this.isListening) {
+            try {
+              this.recognition.start();
+            } catch (error) {
+              console.error('Error restarting recognition:', error);
+            }
+          }
+        }, 100);
+      }
+    };
+
+    this.createFloatingBar();
+    this.startListening();
+  }
+
+  private createFloatingBar() {
+    // Ensure document.body exists
+    if (!document.body) {
+      console.warn('⚠️ document.body not ready, retrying...');
+      setTimeout(() => this.createFloatingBar(), 100);
+      return;
+    }
+
+    // Create container
+    this.container = document.createElement('div');
+    this.container.id = 'intella-speech-overlay';
+    this.container.style.cssText = `
+      position: fixed !important;
+      top: 0 !important;
+      left: 0 !important;
+      right: 0 !important;
+      bottom: 0 !important;
+      pointer-events: none !important;
+      z-index: 2147483647 !important;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", sans-serif !important;
+    `;
+
+    // Create floating bar
+    this.floatingBar = document.createElement('div');
+    this.floatingBar.id = 'intella-speech-bar';
+    this.floatingBar.style.cssText = `
+      position: fixed !important;
+      bottom: 30px !important;
+      left: 50% !important;
+      transform: translateX(-50%) !important;
+      background: rgba(139, 116, 95, 0.95) !important;
+      backdrop-filter: blur(10px) !important;
+      border-radius: 12px !important;
+      padding: 12px 16px !important;
+      display: flex !important;
+      align-items: center !important;
+      gap: 12px !important;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2) !important;
+      pointer-events: auto !important;
+      transition: all 0.3s ease !important;
+    `;
+
+    // Create icon (left side)
+    const icon = document.createElement('div');
+    icon.style.cssText = `
+      width: 32px !important;
+      height: 32px !important;
+      background: #4fd1c5 !important;
+      border-radius: 50% !important;
+      display: flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      flex-shrink: 0 !important;
+    `;
+    icon.innerHTML = `
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2">
+        <line x1="8" y1="6" x2="8" y2="10"/>
+        <line x1="16" y1="6" x2="16" y2="10"/>
+        <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/>
+        <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+      </svg>
+    `;
+
+    // Create buttons container
+    const buttonsContainer = document.createElement('div');
+    buttonsContainer.style.cssText = `
+      display: flex !important;
+      align-items: center !important;
+      gap: 8px !important;
+    `;
+
+    // Insights button
+    const insightsBtn = this.createBarButton('Insights', `
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M3 3h18v18H3z"/>
+        <path d="M7 7h10v10H7z"/>
+        <path d="M11 11h2v2h-2z"/>
+      </svg>
+    `, () => this.showInsights());
+
+    // Ask button
+    const askBtn = this.createBarButton('Ask', `
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
+      </svg>
+    `, () => this.openAskDialog());
+
+    // Separator
+    const separator = document.createElement('div');
+    separator.style.cssText = `
+      width: 1px !important;
+      height: 20px !important;
+      background: rgba(255, 255, 255, 0.3) !important;
+    `;
+
+    // Pause button
+    const pauseBtn = document.createElement('button');
+    pauseBtn.innerHTML = `
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2">
+        <line x1="10" y1="4" x2="10" y2="20"/>
+        <line x1="14" y1="4" x2="14" y2="20"/>
+      </svg>
+    `;
+    pauseBtn.style.cssText = `
+      width: 32px !important;
+      height: 32px !important;
+      background: transparent !important;
+      border: none !important;
+      border-radius: 50% !important;
+      cursor: pointer !important;
+      display: flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      color: white !important;
+      padding: 0 !important;
+      transition: background 0.2s ease !important;
+    `;
+    pauseBtn.addEventListener('mouseenter', () => {
+      pauseBtn.style.background = 'rgba(255, 255, 255, 0.1)';
+    });
+    pauseBtn.addEventListener('mouseleave', () => {
+      pauseBtn.style.background = 'transparent';
+    });
+    pauseBtn.addEventListener('click', () => {
+      if (this.isListening) {
+        this.stopListening();
+      } else {
+        this.startListening();
+      }
+    });
+
+    // More menu button
+    const moreBtn = document.createElement('button');
+    moreBtn.innerHTML = `
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2">
+        <circle cx="12" cy="12" r="1"/>
+        <circle cx="19" cy="12" r="1"/>
+        <circle cx="5" cy="12" r="1"/>
+      </svg>
+    `;
+    moreBtn.style.cssText = `
+      width: 32px !important;
+      height: 32px !important;
+      background: transparent !important;
+      border: none !important;
+      border-radius: 50% !important;
+      cursor: pointer !important;
+      display: flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      color: white !important;
+      padding: 0 !important;
+      transition: background 0.2s ease !important;
+    `;
+    moreBtn.addEventListener('mouseenter', () => {
+      moreBtn.style.background = 'rgba(255, 255, 255, 0.1)';
+    });
+    moreBtn.addEventListener('mouseleave', () => {
+      moreBtn.style.background = 'transparent';
+    });
+
+    // Chevron down button
+    const chevronBtn = document.createElement('button');
+    chevronBtn.innerHTML = `
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2">
+        <polyline points="6,9 12,15 18,9"/>
+      </svg>
+    `;
+    chevronBtn.style.cssText = `
+      width: 32px !important;
+      height: 32px !important;
+      background: transparent !important;
+      border: none !important;
+      border-radius: 50% !important;
+      cursor: pointer !important;
+      display: flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      color: white !important;
+      padding: 0 !important;
+      transition: background 0.2s ease !important;
+    `;
+    chevronBtn.addEventListener('mouseenter', () => {
+      chevronBtn.style.background = 'rgba(255, 255, 255, 0.1)';
+    });
+    chevronBtn.addEventListener('mouseleave', () => {
+      chevronBtn.style.background = 'transparent';
+    });
+    chevronBtn.addEventListener('click', () => {
+      this.toggleSuggestions();
+    });
+
+    buttonsContainer.appendChild(insightsBtn);
+    buttonsContainer.appendChild(askBtn);
+    buttonsContainer.appendChild(separator);
+    buttonsContainer.appendChild(pauseBtn);
+    buttonsContainer.appendChild(moreBtn);
+    buttonsContainer.appendChild(chevronBtn);
+
+    this.floatingBar.appendChild(icon);
+    this.floatingBar.appendChild(buttonsContainer);
+    this.container.appendChild(this.floatingBar);
+    this.createSuggestionsPopup();
+    this.container.appendChild(this.suggestionsPopup!);
+    document.body.appendChild(this.container);
+  }
+
+  private createBarButton(label: string, icon: string, onClick: () => void): HTMLButtonElement {
+    const btn = document.createElement('button');
+    btn.innerHTML = `${icon} <span style="margin-left: 6px; color: white; font-size: 14px;">${label}</span>`;
+    btn.style.cssText = `
+      display: flex !important;
+      align-items: center !important;
+      padding: 8px 12px !important;
+      background: transparent !important;
+      border: none !important;
+      border-radius: 8px !important;
+      cursor: pointer !important;
+      color: white !important;
+      transition: background 0.2s ease !important;
+      font-size: 14px !important;
+    `;
+    btn.addEventListener('mouseenter', () => {
+      btn.style.background = 'rgba(255, 255, 255, 0.1)';
+    });
+    btn.addEventListener('mouseleave', () => {
+      btn.style.background = 'transparent';
+    });
+    btn.addEventListener('click', onClick);
+    return btn;
+  }
+
+  private createSuggestionsPopup() {
+    this.suggestionsPopup = document.createElement('div');
+    this.suggestionsPopup.id = 'intella-suggestions-popup';
+    this.suggestionsPopup.style.cssText = `
+      position: fixed !important;
+      bottom: 100px !important;
+      left: 50% !important;
+      transform: translateX(-50%) !important;
+      background: rgba(139, 116, 95, 0.95) !important;
+      backdrop-filter: blur(10px) !important;
+      border-radius: 12px !important;
+      padding: 16px !important;
+      min-width: 300px !important;
+      max-width: 500px !important;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2) !important;
+      pointer-events: auto !important;
+      opacity: 0 !important;
+      transform: translateX(-50%) translateY(10px) !important;
+      transition: all 0.3s ease !important;
+      display: none !important;
+    `;
+
+    const title = document.createElement('div');
+    title.textContent = 'Suggested Responses';
+    title.style.cssText = `
+      font-size: 14px !important;
+      font-weight: 600 !important;
+      color: white !important;
+      margin-bottom: 12px !important;
+    `;
+
+    const suggestionsContainer = document.createElement('div');
+    suggestionsContainer.id = 'intella-suggestions-list';
+    suggestionsContainer.style.cssText = `
+      display: flex !important;
+      flex-direction: column !important;
+      gap: 8px !important;
+    `;
+
+    this.suggestionsPopup.appendChild(title);
+    this.suggestionsPopup.appendChild(suggestionsContainer);
+  }
+
+  private async analyzeConversation() {
+    if (this.isAnalyzing || this.conversationHistory.length === 0) return;
+    
+    this.isAnalyzing = true;
+    const recentConversation = this.conversationHistory.slice(-5).join(' ');
+    
+    try {
+      // Analyze conversation and get suggestions
+      const response = await chrome.runtime.sendMessage({
+        type: MessageType.ASK_INTELLA,
+        payload: {
+          question: `Based on this conversation context: "${recentConversation}", provide 2-3 brief, actionable suggestions (like "How can I answer?" or "Follow-up question") that would be helpful for the user in this meeting. Keep each suggestion under 30 characters and make them conversational. Return only the suggestions, one per line, no numbering or bullets.`,
+        },
+      });
+
+      if (response.success) {
+        const suggestionsText = response.data || '';
+        this.suggestions = suggestionsText
+          .split('\n')
+          .map((s: string) => s.trim())
+          .filter((s: string) => s.length > 0 && s.length < 50)
+          .slice(0, 3);
+        
+        this.updateSuggestionsPopup();
+        
+        // Auto-show suggestions if we have them
+        if (this.suggestions.length > 0 && !this.showSuggestions) {
+          this.showSuggestionsPopup();
+        }
+      }
+    } catch (error) {
+      console.error('Error analyzing conversation:', error);
+    } finally {
+      this.isAnalyzing = false;
+    }
+  }
+
+  private updateSuggestionsPopup() {
+    const container = document.getElementById('intella-suggestions-list');
+    if (!container) return;
+
+    container.innerHTML = '';
+
+    if (this.suggestions.length === 0) {
+      const empty = document.createElement('div');
+      empty.textContent = 'Listening... suggestions will appear here';
+      empty.style.cssText = `
+        color: rgba(255, 255, 255, 0.6) !important;
+        font-size: 13px !important;
+        padding: 12px !important;
+        text-align: center !important;
+      `;
+      container.appendChild(empty);
+      return;
+    }
+
+    this.suggestions.forEach((suggestion) => {
+      const btn = document.createElement('button');
+      btn.textContent = suggestion;
+      btn.style.cssText = `
+        padding: 12px 16px !important;
+        background: rgba(255, 255, 255, 0.1) !important;
+        border: none !important;
+        border-radius: 8px !important;
+        color: white !important;
+        font-size: 14px !important;
+        cursor: pointer !important;
+        text-align: left !important;
+        transition: background 0.2s ease !important;
+        width: 100% !important;
+      `;
+      btn.addEventListener('mouseenter', () => {
+        btn.style.background = 'rgba(255, 255, 255, 0.2)';
+      });
+      btn.addEventListener('mouseleave', () => {
+        btn.style.background = 'rgba(255, 255, 255, 0.1)';
+      });
+      btn.addEventListener('click', () => {
+        this.handleSuggestionClick(suggestion);
+      });
+      container.appendChild(btn);
+    });
+  }
+
+  private showSuggestionsPopup() {
+    if (!this.suggestionsPopup) return;
+    
+    this.showSuggestions = true;
+    this.suggestionsPopup.style.display = 'block';
+    
+    setTimeout(() => {
+      if (this.suggestionsPopup) {
+        this.suggestionsPopup.style.opacity = '1';
+        this.suggestionsPopup.style.transform = 'translateX(-50%) translateY(0)';
+      }
+    }, 10);
+
+    // Auto-hide after 10 seconds
+    setTimeout(() => {
+      this.hideSuggestionsPopup();
+    }, 10000);
+  }
+
+  private hideSuggestionsPopup() {
+    if (!this.suggestionsPopup) return;
+    
+    this.suggestionsPopup.style.opacity = '0';
+    this.suggestionsPopup.style.transform = 'translateX(-50%) translateY(10px)';
+    
+    setTimeout(() => {
+      if (this.suggestionsPopup) {
+        this.suggestionsPopup.style.display = 'none';
+      }
+      this.showSuggestions = false;
+    }, 300);
+  }
+
+  private toggleSuggestions() {
+    if (this.showSuggestions) {
+      this.hideSuggestionsPopup();
+    } else {
+      this.showSuggestionsPopup();
+    }
+  }
+
+  private async handleSuggestionClick(suggestion: string) {
+    // Open sidepanel with the suggestion as a query
+    try {
+      await chrome.runtime.sendMessage({
+        type: MessageType.FLOAT_QUERY,
+        payload: { query: suggestion, source: 'speech-overlay' },
+      });
+      
+      await chrome.runtime.sendMessage({
+        type: MessageType.OPEN_SIDEPANEL,
+      });
+      
+      this.hideSuggestionsPopup();
+    } catch (error) {
+      console.error('Error handling suggestion click:', error);
+    }
+  }
+
+  private showInsights() {
+    // Open sidepanel with conversation summary
+    chrome.runtime.sendMessage({
+      type: MessageType.FLOAT_QUERY,
+      payload: { 
+        query: `Summarize the key points from this meeting conversation: ${this.conversationHistory.join(' ')}`,
+        source: 'speech-insights'
+      },
+    }).then(() => {
+      chrome.runtime.sendMessage({ type: MessageType.OPEN_SIDEPANEL });
+    });
+  }
+
+  private openAskDialog() {
+    // Open sidepanel for asking questions
+    chrome.runtime.sendMessage({ type: MessageType.OPEN_SIDEPANEL });
+  }
+
+  public startListening() {
+    if (!this.recognition || this.isListening) return;
+    
+    try {
+      this.recognition.start();
+      console.log('🎤 Started speech recognition');
+    } catch (error) {
+      console.error('Error starting speech recognition:', error);
+    }
+  }
+
+  public stopListening() {
+    if (!this.recognition || !this.isListening) return;
+    
+    this.isListening = false;
+    this.recognition.stop();
+    console.log('🔇 Stopped speech recognition');
+  }
+
+  public destroy() {
+    this.stopListening();
+    if (this.container) {
+      this.container.remove();
+      this.container = null;
+    }
+    this.floatingBar = null;
+    this.suggestionsPopup = null;
+  }
+}
+
 // Feature 1: Floating Search Bar Component
 class FloatingSearchBar {
   private container: HTMLDivElement | null = null;
@@ -634,6 +1199,7 @@ class ContentScript {
   private floatingSearchBar: FloatingSearchBar | null = null;
   private sidepanelToggle: FloatingSidepanelToggle | null = null;
   private halloweenTheme: HalloweenContentTheme | null = null;
+  private speechOverlay: SpeechToTextOverlay | null = null;
 
   constructor() {
     this.initialize();
@@ -659,6 +1225,9 @@ class ContentScript {
     
     // Initialize Halloween theme
     await this.initializeHalloweenTheme();
+    
+    // Initialize speech-to-text overlay for Google Meet
+    await this.initializeSpeechToTextOverlay();
   }
 
   private async initializeFloatingSearchBar() {
@@ -739,6 +1308,38 @@ class ContentScript {
     } catch (error) {
       console.error('💥 Error initializing Halloween theme:', error);
     }
+  }
+
+  private async initializeSpeechToTextOverlay() {
+    try {
+      console.log('🎤 initializeSpeechToTextOverlay() called');
+      
+      // Check if we're on Google Meet
+      const hostname = window.location.hostname;
+      const isGoogleMeet = hostname.includes('meet.google.com');
+      
+      if (!isGoogleMeet) {
+        console.log('❌ Not on Google Meet, skipping speech overlay');
+        return;
+      }
+
+      console.log('✅ On Google Meet, initializing speech-to-text overlay...');
+      
+      // Check if Speech Recognition API is available
+      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      if (!SpeechRecognition) {
+        console.warn('⚠️ Speech Recognition API not available');
+        return;
+      }
+
+      this.speechOverlay = new SpeechToTextOverlay();
+      console.log('✅ Speech-to-text overlay created and initialized');
+    } catch (error) {
+      console.error('💥 Error initializing speech-to-text overlay:', error);
+    }
+
+    console.log('🎤 Speech-to-text overlay initialized');
+    console.log(this.speechOverlay)
   }
 
   private async handleMessage(message: Message): Promise<any> {
@@ -867,6 +1468,206 @@ class ContentScript {
             success: true,
             data: { text },
           };
+        }
+
+        case 'search_element': {
+          const { criteria, method, query, limit = 10 } = args;
+          
+          try {
+            // Helper function to search elements by a single criterion
+            const searchByCriterion = (searchMethod: string, searchQuery: string): Element[] => {
+              let foundElements: Element[] = [];
+              
+              switch (searchMethod) {
+                case 'css': {
+                  foundElements = Array.from(document.querySelectorAll(searchQuery));
+                  break;
+                }
+                
+                case 'xpath': {
+                  const xpathResult = document.evaluate(
+                    searchQuery,
+                    document,
+                    null,
+                    XPathResult.ORDERED_NODE_SNAPSHOT_TYPE,
+                    null
+                  );
+                  const nodeArray: Element[] = [];
+                  for (let i = 0; i < xpathResult.snapshotLength; i++) {
+                    const node = xpathResult.snapshotItem(i);
+                    if (node && node.nodeType === Node.ELEMENT_NODE) {
+                      nodeArray.push(node as Element);
+                    }
+                  }
+                  foundElements = nodeArray;
+                  break;
+                }
+                
+                case 'text': {
+                  // Search for elements containing the text (case-insensitive partial match)
+                  const walker = document.createTreeWalker(
+                    document.body,
+                    NodeFilter.SHOW_TEXT,
+                    null
+                  );
+                  const textNodes: Text[] = [];
+                  let node;
+                  while ((node = walker.nextNode())) {
+                    if (node.textContent && node.textContent.toLowerCase().includes(searchQuery.toLowerCase())) {
+                      textNodes.push(node as Text);
+                    }
+                  }
+                  // Get unique parent elements
+                  const uniqueElements = new Set<Element>();
+                  textNodes.forEach(textNode => {
+                    let parent = textNode.parentElement;
+                    while (parent && parent !== document.body) {
+                      uniqueElements.add(parent);
+                      parent = parent.parentElement;
+                    }
+                  });
+                  foundElements = Array.from(uniqueElements);
+                  break;
+                }
+                
+                case 'id': {
+                  const element = document.getElementById(searchQuery);
+                  if (element) {
+                    foundElements = [element];
+                  }
+                  break;
+                }
+                
+                case 'class': {
+                  foundElements = Array.from(document.getElementsByClassName(searchQuery));
+                  break;
+                }
+                
+                case 'name': {
+                  foundElements = Array.from(document.getElementsByName(searchQuery));
+                  break;
+                }
+                
+                case 'tag': {
+                  foundElements = Array.from(document.getElementsByTagName(searchQuery));
+                  break;
+                }
+                
+                case 'role': {
+                  foundElements = Array.from(document.querySelectorAll(`[role="${searchQuery}"]`));
+                  break;
+                }
+                
+                case 'attribute': {
+                  // Parse attribute query: "attrName=attrValue" or just "attrName" for any value
+                  const parts = searchQuery.split('=');
+                  if (parts.length === 2) {
+                    const [attrName, attrValue] = parts;
+                    foundElements = Array.from(document.querySelectorAll(`[${attrName}="${attrValue}"]`));
+                  } else {
+                    // Search for any element with this attribute
+                    foundElements = Array.from(document.querySelectorAll(`[${searchQuery}]`));
+                  }
+                  break;
+                }
+                
+                default:
+                  throw new Error(`Unknown search method: ${searchMethod}`);
+              }
+              
+              return foundElements;
+            };
+            
+            // Determine which criteria to use
+            let searchCriteria: Array<{ method: string; query: string }> = [];
+            
+            if (criteria && Array.isArray(criteria) && criteria.length > 0) {
+              // Use criteria array if provided
+              searchCriteria = criteria;
+            } else if (method && query) {
+              // Fall back to single method/query for backward compatibility
+              searchCriteria = [{ method, query }];
+            } else {
+              return {
+                success: false,
+                error: 'Either criteria array or method/query must be provided',
+              };
+            }
+            
+            // Start with first criterion
+            let elements = searchByCriterion(searchCriteria[0].method, searchCriteria[0].query);
+            
+            // Apply remaining criteria (AND logic - elements must match all criteria)
+            for (let i = 1; i < searchCriteria.length; i++) {
+              const criterion = searchCriteria[i];
+              const criterionElements = searchByCriterion(criterion.method, criterion.query);
+              
+              // Filter to only elements that match this criterion too
+              const criterionSet = new Set(criterionElements);
+              elements = elements.filter(el => criterionSet.has(el));
+            }
+            
+            // Limit results
+            elements = elements.slice(0, limit);
+            
+            // Extract useful information about each element
+            const results = elements.map((el, index) => {
+              const rect = el.getBoundingClientRect();
+              const computedStyle = window.getComputedStyle(el);
+              
+              // Build a unique selector for the element
+              const getSelector = (element: Element): string => {
+                if (element.id) {
+                  return `#${element.id}`;
+                }
+                if (element.className && typeof element.className === 'string') {
+                  const classes = element.className.split(' ').filter(c => c.trim()).join('.');
+                  if (classes) {
+                    return `${element.tagName.toLowerCase()}.${classes}`;
+                  }
+                }
+                return element.tagName.toLowerCase();
+              };
+              
+              return {
+                index: index + 1,
+                tag: el.tagName.toLowerCase(),
+                id: el.id || null,
+                classes: el.className && typeof el.className === 'string' 
+                  ? el.className.split(' ').filter(c => c.trim()) 
+                  : [],
+                text: (el.textContent || '').trim().substring(0, 100),
+                selector: getSelector(el),
+                attributes: Array.from(el.attributes).reduce((acc, attr) => {
+                  acc[attr.name] = attr.value;
+                  return acc;
+                }, {} as Record<string, string>),
+                position: {
+                  x: Math.round(rect.x),
+                  y: Math.round(rect.y),
+                  width: Math.round(rect.width),
+                  height: Math.round(rect.height),
+                },
+                visible: rect.width > 0 && rect.height > 0 && computedStyle.display !== 'none' && computedStyle.visibility !== 'hidden',
+              };
+            });
+            
+            return {
+              success: true,
+              data: {
+                count: results.length,
+                elements: results,
+                criteria: searchCriteria,
+                method: searchCriteria.length === 1 ? searchCriteria[0].method : undefined,
+                query: searchCriteria.length === 1 ? searchCriteria[0].query : undefined,
+              },
+            };
+          } catch (error) {
+            return {
+              success: false,
+              error: error instanceof Error ? error.message : 'Unknown error during element search',
+            };
+          }
         }
 
         default:

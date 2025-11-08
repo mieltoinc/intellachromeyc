@@ -50,6 +50,7 @@ export interface UserSettings {
   ingestionMethod: 'completions' | 'upload' | 'both';
   isAnalysisActive: boolean;
   selectedModel?: string;
+  enableStreaming?: boolean;
   
   // Feature 4: Privacy & Blocked Sites
   privacy: {
@@ -106,6 +107,7 @@ export const DEFAULT_SETTINGS: UserSettings = {
   ingestionMethod: 'both',
   isAnalysisActive: true,
   selectedModel: 'gpt-4o',
+  enableStreaming: true,
   
   // Feature 4: Privacy & Blocked Sites
   privacy: {

@@ -254,10 +254,20 @@ const OptionsInner: React.FC = () => {
     setIsChatLoading(true);
 
     try {
+      // Convert chatMessages to conversation history format (exclude the current message we just added)
+      // We'll pass all previous messages to maintain conversation context
+      const conversationHistory = chatMessages.map(msg => ({
+        role: msg.role,
+        content: msg.content,
+      }));
+      
       // Ask Intella (memories will be automatically included by the API)
       const response = await chrome.runtime.sendMessage({
         type: MessageType.ASK_INTELLA,
-        payload: { question: currentQuery },
+        payload: { 
+          question: currentQuery,
+          conversationHistory, // Pass the conversation history
+        },
       });
 
       if (response.success) {

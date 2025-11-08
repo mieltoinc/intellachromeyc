@@ -3,7 +3,7 @@
  * Uses api.mielto.com (appends /api/v1 automatically) as the base URL
  */
 
-import { streamText, tool, stepCountIs } from 'ai';
+import { streamText, generateText, tool, stepCountIs } from 'ai';
 import { createOpenAI } from '@ai-sdk/openai';
 import { storage } from './storage';
 import { mieltoAuth } from '@/lib/auth';
@@ -11,7 +11,14 @@ import { toolRegistry } from './tool-registry';
 
 export interface AIMessage {
   role: 'user' | 'assistant' | 'system' | 'tool';
-  content: string | Array<{ type: 'text' | 'image'; text?: string; image?: string }>;
+  content: string | Array<{ 
+    type: 'text' | 'image_url'; 
+    text?: string; 
+    image_url?: { 
+      url: string; 
+      detail?: 'low' | 'high' | 'auto' 
+    } 
+  }>;
   tool_calls?: any[];
   tool_call_id?: string;
 }
@@ -172,7 +179,7 @@ export class AISDKClient {
       // Create OpenAI provider with custom base URL using createOpenAI
       // This creates a callable provider function that accepts model names
       const openaiProvider = createOpenAI({
-        apiKey,
+        apiKey, // 
         baseURL: baseUrl,
       });
 
@@ -182,12 +189,45 @@ export class AISDKClient {
       // Prepare messages for AI SDK
       const conversationMessages = messages.map(msg => {
         if (msg.role === 'tool' && msg.tool_call_id) {
+          // Check if tool result contains a screenshot and convert to image content
+          try {
+            const toolContent = typeof msg.content === 'string' ? JSON.parse(msg.content) : msg.content;
+            
+            // Check if this is a screenshot result from capture_screenshot tool
+            if (toolContent && typeof toolContent === 'object' && toolContent.screenshot) {
+              const screenshotUrl = toolContent.screenshot;
+              console.log('📸 Converting screenshot tool result to image_url format');
+              // Convert to image_url content format
+              return {
+                role: 'tool' as const,
+                content: [
+                  {
+                    type: 'image' as const,
+                    image_url: {
+                      url: screenshotUrl,
+                      detail: 'auto' as const
+                    }
+                  }
+                ],
+                toolCallId: msg.tool_call_id,
+              };
+            }
+          } catch (e) {
+            // If parsing fails, use original content
+          }
+          
           return {
             role: 'tool' as const,
             content: msg.content,
             toolCallId: msg.tool_call_id,
           };
         }
+        
+        // Log multimodal content for debugging
+        if (Array.isArray(msg.content)) {
+          console.log('🖼️ Multimodal message detected:', JSON.stringify(msg.content, null, 2));
+        }
+        
         return {
           role: msg.role,
           content: msg.content,
@@ -206,8 +246,8 @@ export class AISDKClient {
         console.log(`🔧 Tools enabled: ${enableTools}, Found ${zodSchemas.size} tools`);
 
         // Create tools using Zod schemas directly
-        for (const [toolName, { description, schema }] of zodSchemas.entries()) {
-          tools[toolName] = tool({
+        for (const [toolName, { description, schema, outputSchema }] of zodSchemas.entries()) {
+          const toolConfig: any = {
             description,
             inputSchema: schema,
             execute: async (args: Record<string, any>) => {
@@ -237,51 +277,88 @@ export class AISDKClient {
                 return { error: error.message || 'Unknown error' };
               }
             },
+          };
+          
+          // Add outputSchema if provided
+          if (outputSchema) {
+            toolConfig.outputSchema = outputSchema;
+          }
+          
+          tools[toolName] = tool(toolConfig);
+        }
+      }
+
+      // Check if streaming is enabled (read from settings we already have)
+      const useStreaming = true
+
+      if (useStreaming) {
+        // Use streamText for streaming responses
+        console.log('📡 Using streaming mode');
+        let streamResult: any;
+        if (Object.keys(tools).length > 0) {
+          streamResult = streamText({
+            model: languageModel,
+            messages: conversationMessages as any,
+            tools,
+            temperature,
+            stopWhen: stepCountIs(5),
+          } as any);
+        } else {
+          // No tools - simple generation
+          streamResult = streamText({
+            model: languageModel,
+            messages: conversationMessages as any,
+            temperature,
           });
         }
-      }
 
-      // Use streamText instead of generateText
-      let streamResult: any;
-      if (Object.keys(tools).length > 0) {
-        streamResult = streamText({
-          model: languageModel,
-          messages: conversationMessages as any,
-          tools,
-          temperature,
-          stopWhen: stepCountIs(5),
-        } as any);
-      } else {
-        // No tools - simple generation
-        streamResult = streamText({
-          model: languageModel,
-          messages: conversationMessages as any,
-          temperature,
-        });
-      }
-
-      // Collect streamed text chunks
-      for await (const textChunk of streamResult.textStream) {
-        finalResponse += textChunk;
-      }
-
-      // Get final text and usage from stream result (these are Promises)
-      try {
-        // Try to get the full text if available (some SDK versions provide this)
-        const fullText = await streamResult.text;
-        if (fullText && fullText.trim()) {
-          finalResponse = fullText;
+        // Collect streamed text chunks
+        for await (const textChunk of streamResult.textStream) {
+          finalResponse += textChunk;
         }
-      } catch (e) {
-        // text property might not exist, use accumulated response
-        console.log('streamResult.text not available, using accumulated text');
-      }
 
-      // Get usage stats
-      try {
-        finalUsage = await streamResult.usage;
-      } catch (e) {
-        console.log('Could not get usage stats from stream result');
+        // Get final text and usage from stream result (these are Promises)
+        try {
+          // Try to get the full text if available (some SDK versions provide this)
+          const fullText = await streamResult.text;
+          if (fullText && fullText.trim()) {
+            finalResponse = fullText;
+          }
+        } catch (e) {
+          // text property might not exist, use accumulated response
+          console.log('streamResult.text not available, using accumulated text');
+        }
+
+        // Get usage stats
+        try {
+          finalUsage = await streamResult.usage;
+        } catch (e) {
+          console.log('Could not get usage stats from stream result');
+        }
+      } else {
+        // Use generateText for non-streaming responses (better for tool calling)
+        console.log('📝 Using non-streaming mode');
+        let generateResult: any;
+        if (Object.keys(tools).length > 0) {
+          generateResult = await generateText({
+            model: languageModel,
+            messages: conversationMessages as any,
+            tools,
+            temperature,
+            maxSteps: 5,
+          } as any);
+        } else {
+          // No tools - simple generation
+          generateResult = await generateText({
+            model: languageModel,
+            messages: conversationMessages as any,
+            temperature,
+          });
+        }
+
+        // Get final text and usage from result
+        finalResponse = generateResult.text || '';
+        finalUsage = generateResult.usage;
       }
 
       // Fallback if no response was generated
@@ -331,6 +408,16 @@ export class AISDKClient {
       // Always read fresh from settings to ensure latest baseURL is used
       const settings = await storage.getSettings();
       const apiUrl = settings.apiUrl || this.defaultBaseUrl;
+      
+      // Check if streaming is enabled
+      const useStreaming = settings.enableStreaming || false;
+      
+      if (!useStreaming) {
+        // Streaming disabled - use generate and simulate streaming
+        console.log('⚠️ Streaming disabled - using non-streaming generation with simulated streaming');
+        const result = await this.generate(messages, options);
+        return this.simulateStream(result.content);
+      }
       
       // For AI SDK, append /api/v1/ to the base URL
       const baseUrlWithoutTrailingSlash = apiUrl.replace(/\/$/, '');
