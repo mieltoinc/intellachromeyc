@@ -302,6 +302,9 @@ async function handleMessage(message: Message, _sender: chrome.runtime.MessageSe
       case MessageType.CLOSE_SIDEPANEL:
         return await handleCloseSidepanel();
 
+      case MessageType.GET_SIDEPANEL_STATE:
+        return await handleGetSidepanelState();
+
       default:
         return { success: false, error: 'Unknown message type' };
     }
@@ -957,14 +960,15 @@ async function broadcastBlockedDomainsUpdate(blockedDomains: string[]): Promise<
 }
 
 // Feature 1: Floating Search Bar handlers
-async function handleFloatQuery(payload: { query: string; source?: string }): Promise<MessageResponse> {
+async function handleFloatQuery(payload: { query: string; source?: string; appendToExisting?: boolean }): Promise<MessageResponse> {
   try {
     console.log('🔍 Background: Handling floating search query:', payload.query, 'from:', payload.source);
 
     const queryData = {
       query: payload.query,
       timestamp: Date.now(),
-      source: payload.source || 'floating'
+      source: payload.source || 'floating',
+      appendToExisting: payload.appendToExisting || false
     };
 
     console.log('💾 Background: Storing query data:', queryData);
@@ -972,6 +976,14 @@ async function handleFloatQuery(payload: { query: string; source?: string }): Pr
     // Store the query in a temporary storage for the sidepanel to pick up
     await chrome.storage.session.set({
       'floating-query': queryData
+    });
+
+    // Also update sidepanel state tracking
+    await chrome.storage.session.set({
+      'sidepanel-state': {
+        isOpen: sidepanelState.isOpen,
+        lastActivity: Date.now()
+      }
     });
 
     // Verify it was stored
@@ -1086,6 +1098,23 @@ async function handleCloseSidepanel(): Promise<MessageResponse> {
     return { success: true };
   } catch (error: any) {
     console.error('❌ Failed to send close message:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+async function handleGetSidepanelState(): Promise<MessageResponse> {
+  console.log('📊 Getting sidepanel state...');
+  
+  try {
+    return { 
+      success: true, 
+      data: {
+        isOpen: sidepanelState.isOpen,
+        windowId: sidepanelState.windowId
+      }
+    };
+  } catch (error: any) {
+    console.error('❌ Failed to get sidepanel state:', error);
     return { success: false, error: error.message };
   }
 }

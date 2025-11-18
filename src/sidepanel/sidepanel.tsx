@@ -5,7 +5,7 @@
 
 import React, { useState, useEffect, useRef, useReducer } from 'react';
 import ReactDOM from 'react-dom/client';
-import { Send, Search, BookOpen, Sparkles, Settings as SettingsIcon, RefreshCw, Plus, CheckCircle, AlertCircle, Loader2, Menu, Eye, EyeOff, Zap, Mic, MicOff, Phone, PhoneOff, X } from 'lucide-react';
+import { Send, Search, BookOpen, Sparkles, Settings as SettingsIcon, RefreshCw, Plus, CheckCircle, AlertCircle, Loader2, Menu, Eye, EyeOff, Zap, Mic, MicOff, X } from 'lucide-react';
 import { MessageType } from '@/types/messages';
 import { Memory, UserSettings } from '@/types/memory';
 import { mieltoAPI } from '@/utils/api';
@@ -21,7 +21,6 @@ import { getFirstActiveApiKey } from '@/handlers/apikey.handler';
 import { mieltoAuth } from '@/lib/auth';
 import { ThemeProvider } from '@/components/ThemeContext';
 import { ThemeToggle } from '@/components/ThemeToggle';
-import { LiveKitVoiceChat, createLiveKitToken } from '@/utils/livekit';
 import '../styles/app.css';
 
 interface ToolExecution {
@@ -59,11 +58,12 @@ const SidePanelInner: React.FC = () => {
   }>({ isUploading: false });
   // const [isStreaming, setIsStreaming] = useState(false);
   
-  // Voice chat state
-  const [voiceChat, setVoiceChat] = useState<LiveKitVoiceChat | null>(null);
+  // Voice chat state (browser speech-to-text)
+  const [speechRecognition, setSpeechRecognition] = useState<any | null>(null);
   const [isVoiceChatActive, setIsVoiceChatActive] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [isMicEnabled, setIsMicEnabled] = useState(false);
+  const [isListening, setIsListening] = useState(false);
   const [selectedModel, setSelectedModel] = useState<string>('gpt-4o');
 
   // State tab variables (from popup)
@@ -368,8 +368,8 @@ const SidePanelInner: React.FC = () => {
       console.log('📦 SidePanel: Session storage result:', result);
 
       if (result['floating-query']) {
-        const { query, timestamp, source } = result['floating-query'];
-        console.log('✅ SidePanel: Found floating query:', query, 'from:', source, 'timestamp:', timestamp);
+        const { query, timestamp, source, appendToExisting } = result['floating-query'];
+        console.log('✅ SidePanel: Found floating query:', query, 'from:', source, 'timestamp:', timestamp, 'appendToExisting:', appendToExisting);
 
         // Check if query is recent (within last 10 seconds)
         const age = Date.now() - timestamp;
@@ -381,6 +381,13 @@ const SidePanelInner: React.FC = () => {
           // Switch to chat tab first
           console.log('📑 SidePanel: Switching to chat tab');
           setActiveTab('chat');
+
+          // If appendToExisting is true and we have existing messages, just add to the conversation
+          if (appendToExisting && chatMessages.length > 0) {
+            console.log('🔄 SidePanel: Appending to existing conversation with', chatMessages.length, 'messages');
+          } else {
+            console.log('🆕 SidePanel: Starting new conversation or no existing messages');
+          }
 
           // Directly submit the query without setting state first
           console.log('🚀 SidePanel: Directly submitting floating query:', query);
@@ -1047,16 +1054,19 @@ const SidePanelInner: React.FC = () => {
     }
   };
 
-  // Voice chat handlers
+  // Voice chat handlers (browser speech-to-text)
   const handleStartVoiceChat = async () => {
-    if (!settings?.apiKey) {
-      alert('Please configure your API key in settings first.');
+    setIsConnecting(true);
+    
+    // Check if Speech Recognition API is available
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      alert('Speech recognition is not supported in this browser. Please use Chrome or Edge.');
+      setIsConnecting(false);
       return;
     }
 
-    setIsConnecting(true);
-    
-    // First, test if we can access microphone at all
+    // Test microphone access
     try {
       console.log('🔍 Testing microphone access...');
       const testStream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -1065,130 +1075,180 @@ const SidePanelInner: React.FC = () => {
     } catch (permError) {
       console.error('❌ Microphone permission denied:', permError);
       setIsConnecting(false);
-      alert('Microphone access is required for voice chat. Please:\n\n1. Click the microphone icon in your browser address bar\n2. Select "Allow"\n3. Try again\n\nOr go to Chrome Settings > Privacy and security > Site Settings > Microphone and allow access for this extension.');
+      alert('Microphone access is required for voice input. Please:\n\n1. Click the microphone icon in your browser address bar\n2. Select "Allow"\n3. Try again\n\nOr go to Chrome Settings > Privacy and security > Site Settings > Microphone and allow access for this extension.');
       return;
     }
     
     try {
-      console.log('🎙️ Starting voice chat...');
+      console.log('🎙️ Starting speech recognition...');
       
-      // Get user ID from settings if available
-      const userId = settings?.workspace_id || 'anonymous';
-      
-      // Create LiveKit token with API key and user ID
-      const { token, wsUrl } = await createLiveKitToken(settings.apiKey, userId);
-      
-      // Initialize voice chat
-      const livekitClient = new LiveKitVoiceChat();
-      
-      // Set up message handler to display responses in chat
-      livekitClient.onMessage((message) => {
-        try {
-          const data = JSON.parse(message);
-          if (data.type === 'response' && data.content) {
-            const assistantMessage: ChatMessage = {
-              role: 'assistant',
-              content: data.content,
-              timestamp: new Date(),
-            };
-            setChatMessages(prev => [...prev, assistantMessage]);
+      // Initialize speech recognition
+      const recognition = new SpeechRecognition();
+      recognition.continuous = true;
+      recognition.interimResults = false;
+      recognition.lang = 'en-US';
+
+      // Set up event handlers
+      recognition.onstart = () => {
+        console.log('🎤 Speech recognition started');
+        setIsListening(true);
+        setIsMicEnabled(true);
+      };
+
+      recognition.onresult = async (event: any) => {
+        let transcript = '';
+        
+        // Get the latest result
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          if (event.results[i].isFinal) {
+            transcript += event.results[i][0].transcript;
           }
-        } catch (e) {
-          // If not JSON, treat as plain text response
-          const assistantMessage: ChatMessage = {
-            role: 'assistant',
-            content: message,
+        }
+        
+        if (transcript.trim()) {
+          console.log('🗣️ Speech transcript:', transcript);
+          
+          // Add user message to chat
+          const userMessage: ChatMessage = {
+            role: 'user',
+            content: transcript.trim(),
             timestamp: new Date(),
           };
-          setChatMessages(prev => [...prev, assistantMessage]);
+          setChatMessages(prev => [...prev, userMessage]);
+
+          // Send to AI
+          try {
+            const context = currentPageInfo.hasInfo && currentPageInfo.content 
+              ? currentPageInfo.content 
+              : undefined;
+            
+            const conversationHistory = chatMessages.map(msg => ({
+              role: msg.role,
+              content: msg.content,
+            }));
+            
+            const response = await chrome.runtime.sendMessage({
+              type: MessageType.ASK_INTELLA,
+              payload: { 
+                question: transcript.trim(), 
+                context, 
+                model: selectedModel,
+                conversationHistory,
+              },
+            });
+
+            if (response.success) {
+              const assistantMessage: ChatMessage = {
+                role: 'assistant',
+                content: response.data,
+                timestamp: new Date(),
+                toolExecutions: (response as any).toolExecutions,
+              };
+              setChatMessages(prev => [...prev, assistantMessage]);
+            }
+          } catch (error) {
+            console.error('Error processing speech:', error);
+          }
         }
-      });
-      
-      // Connect to LiveKit
-      await livekitClient.connect({
-        wsUrl,
-        token,
-        apiKey: settings.apiKey,
-        userId: userId
-      });
-      
-      // Enable microphone
-      await livekitClient.enableMicrophone();
-      
-      setVoiceChat(livekitClient);
+      };
+
+      recognition.onerror = (event: any) => {
+        console.error('❌ Speech recognition error:', event.error);
+        if (event.error === 'no-speech') {
+          // Continue listening for no-speech errors
+          return;
+        }
+        
+        setIsListening(false);
+        if (event.error === 'not-allowed') {
+          alert('Microphone access was denied. Please allow microphone access and try again.');
+        }
+      };
+
+      recognition.onend = () => {
+        console.log('🔇 Speech recognition ended');
+        if (isVoiceChatActive && isMicEnabled) {
+          // Restart if we're supposed to be listening
+          setTimeout(() => {
+            if (speechRecognition) {
+              try {
+                speechRecognition.start();
+              } catch (e) {
+                console.log('Recognition restart failed:', e);
+              }
+            }
+          }, 100);
+        } else {
+          setIsListening(false);
+        }
+      };
+
+      // Start recognition
+      recognition.start();
+      setSpeechRecognition(recognition);
       setIsVoiceChatActive(true);
       setIsMicEnabled(true);
       
       // Add system message to chat
       const systemMessage: ChatMessage = {
         role: 'assistant',
-        content: '🎙️ Voice chat started! You can now speak to me directly.',
+        content: '🎙️ Voice input started! You can now speak to me directly.',
         timestamp: new Date(),
       };
       setChatMessages(prev => [...prev, systemMessage]);
       
-      console.log('✅ Voice chat started successfully');
+      console.log('✅ Speech recognition started successfully');
     } catch (error) {
-      console.error('❌ Failed to start voice chat:', error);
+      console.error('❌ Failed to start speech recognition:', error);
       
-      let errorMessage = 'Unknown error occurred';
-      if (error instanceof Error) {
-        if (error.message.includes('Microphone permission')) {
-          errorMessage = 'Please allow microphone access in your browser settings and try again.';
-        } else if (error.message.includes('Failed to create token')) {
-          errorMessage = 'Unable to connect to voice chat service. Please check your internet connection.';
-        } else {
-          errorMessage = error.message;
-        }
-      }
-      
-      alert(`Failed to start voice chat: ${errorMessage}`);
-      
-      // Add error message to chat
-      const errorChatMessage: ChatMessage = {
+      const errorMessage: ChatMessage = {
         role: 'assistant',
-        content: `❌ Voice chat failed to start: ${errorMessage}`,
+        content: `❌ Voice input failed to start: ${error instanceof Error ? error.message : 'Unknown error'}`,
         timestamp: new Date(),
       };
-      setChatMessages(prev => [...prev, errorChatMessage]);
+      setChatMessages(prev => [...prev, errorMessage]);
     } finally {
       setIsConnecting(false);
     }
   };
 
   const handleEndVoiceChat = async () => {
-    if (voiceChat) {
+    if (speechRecognition) {
       try {
-        console.log('🎙️ Ending voice chat...');
-        await voiceChat.disconnect();
-        setVoiceChat(null);
+        console.log('🎙️ Ending voice input...');
+        speechRecognition.stop();
+        setSpeechRecognition(null);
         setIsVoiceChatActive(false);
         setIsMicEnabled(false);
+        setIsListening(false);
         
         // Add system message to chat
         const systemMessage: ChatMessage = {
           role: 'assistant',
-          content: '🎙️ Voice chat ended. You can continue chatting with text.',
+          content: '🎙️ Voice input ended. You can continue chatting with text.',
           timestamp: new Date(),
         };
         setChatMessages(prev => [...prev, systemMessage]);
         
-        console.log('✅ Voice chat ended successfully');
+        console.log('✅ Voice input ended successfully');
       } catch (error) {
-        console.error('❌ Error ending voice chat:', error);
+        console.error('❌ Error ending voice input:', error);
       }
     }
   };
 
   const handleToggleMicrophone = async () => {
-    if (!voiceChat) return;
+    if (!speechRecognition) return;
     
     try {
-      if (isMicEnabled) {
-        await voiceChat.disableMicrophone();
+      if (isMicEnabled && isListening) {
+        console.log('🔇 Stopping speech recognition...');
+        speechRecognition.stop();
         setIsMicEnabled(false);
+        setIsListening(false);
       } else {
-        await voiceChat.enableMicrophone();
+        console.log('🎤 Starting speech recognition...');
+        speechRecognition.start();
         setIsMicEnabled(true);
       }
     } catch (error) {
@@ -1486,7 +1546,7 @@ const SidePanelInner: React.FC = () => {
                         className="p-2 bg-red-500 hover:bg-red-600 text-white rounded-lg transition"
                         title="End voice chat"
                       >
-                        <PhoneOff size={16} />
+                        <MicOff size={16} />
                       </button>
                     </div>
                   </div>
@@ -1552,7 +1612,7 @@ const SidePanelInner: React.FC = () => {
                     {isConnecting ? (
                       <Loader2 size={18} className="animate-spin" />
                     ) : (
-                      <Phone size={18} />
+                      <Mic size={18} />
                     )}
                   </button>
                 ) : null}

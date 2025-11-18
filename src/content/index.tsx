@@ -28,6 +28,7 @@ enum MessageType {
   QUERY_MEMORIES = 'QUERY_MEMORIES',
   OPEN_SIDEPANEL = 'OPEN_SIDEPANEL',
   CLOSE_SIDEPANEL = 'CLOSE_SIDEPANEL',
+  GET_SIDEPANEL_STATE = 'GET_SIDEPANEL_STATE',
   CLEAR_ALL_USER_DATA = 'CLEAR_ALL_USER_DATA',
 }
 
@@ -211,10 +212,13 @@ class DomainBlocker {
 // Floating Sidepanel Toggle Button
 class FloatingSidepanelToggle {
   private container: HTMLDivElement | null = null;
+  private button: HTMLButtonElement | null = null;
   private isVisible = true;
+  private isSidebarOpen = false;
 
   constructor() {
     this.createFloatingButton();
+    this.setupSidepanelStateListener();
   }
 
   private createFloatingButton() {
@@ -233,8 +237,8 @@ class FloatingSidepanelToggle {
     `;
 
     // Create the button
-    const button = document.createElement('button');
-    button.style.cssText = `
+    this.button = document.createElement('button');
+    this.button.style.cssText = `
       width: 48px !important;
       height: 48px !important;
       background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%) !important;
@@ -245,34 +249,33 @@ class FloatingSidepanelToggle {
       display: flex !important;
       align-items: center !important;
       justify-content: center !important;
-      transition: all 0.2s ease !important;
+      transition: all 0.3s ease !important;
       color: white !important;
       margin: 0 !important;
       padding: 0 !important;
     `;
 
-    // Arrow icon (chevron right/left)
-    button.innerHTML = `
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <polyline points="9,18 15,12 9,6"></polyline>
-      </svg>
-    `;
+    // Set initial icon state
+    this.updateButtonIcon();
 
     // Hover effects
-    button.addEventListener('mouseenter', () => {
-      button.style.transform = 'scale(1.1)';
-      button.style.boxShadow = '0 6px 20px rgba(59, 130, 246, 0.5)';
+    this.button.addEventListener('mouseenter', () => {
+      this.button!.style.transform = 'scale(1.1)';
+      this.button!.style.boxShadow = '0 6px 20px rgba(59, 130, 246, 0.5)';
     });
 
-    button.addEventListener('mouseleave', () => {
-      button.style.transform = 'scale(1)';
-      button.style.boxShadow = '0 4px 16px rgba(59, 130, 246, 0.4)';
+    this.button.addEventListener('mouseleave', () => {
+      this.button!.style.transform = 'scale(1)';
+      this.button!.style.boxShadow = '0 4px 16px rgba(59, 130, 246, 0.4)';
     });
 
     // Click handler to toggle sidepanel
-    button.addEventListener('click', async () => {
+    this.button.addEventListener('click', async () => {
       try {
         console.log('🔵 Floating button clicked, sending message to background...');
+        
+        // Animate button (flip effect)
+        this.animateButtonClick();
         
         // Send message to background script (this preserves user gesture context)
         const response = await chrome.runtime.sendMessage({
@@ -280,17 +283,67 @@ class FloatingSidepanelToggle {
         });
         
         if (response && response.success) {
-          console.log('✅ Sidepanel opened successfully');
+          console.log('✅ Sidepanel toggled successfully');
+          // Toggle state and update icon after successful response
+          this.isSidebarOpen = !this.isSidebarOpen;
+          this.updateButtonIcon();
         } else {
-          console.error('❌ Failed to open sidepanel:', response?.error || 'Unknown error');
+          console.error('❌ Failed to toggle sidepanel:', response?.error || 'Unknown error');
         }
       } catch (error) {
         console.error('💥 Error sending message to open sidepanel:', error);
       }
     });
 
-    this.container.appendChild(button);
+    this.container.appendChild(this.button);
     document.body.appendChild(this.container);
+  }
+
+  private updateButtonIcon() {
+    if (!this.button) return;
+
+    // Icon points left when sidebar is closed (indicating it will open sidebar)
+    // Icon points right when sidebar is open (indicating it will close sidebar)
+    const points = this.isSidebarOpen ? '15,6 9,12 15,18' : '9,18 15,12 9,6';
+    
+    this.button.innerHTML = `
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="transition: transform 0.3s ease;">
+        <polyline points="${points}"></polyline>
+      </svg>
+    `;
+  }
+
+  private animateButtonClick() {
+    if (!this.button) return;
+
+    // Add flip animation class
+    const svg = this.button.querySelector('svg');
+    if (svg) {
+      // Apply a vertical flip animation
+      svg.style.transform = 'rotateY(180deg)';
+      
+      // Reset after animation completes
+      setTimeout(() => {
+        if (svg) {
+          svg.style.transform = 'rotateY(0deg)';
+        }
+      }, 300);
+    }
+  }
+
+  private setupSidepanelStateListener() {
+    // Listen for messages from background script about sidepanel state
+    // Note: Since we can't easily track sidepanel state from content script,
+    // we'll use our local state and update it based on user interactions
+    // This is a simplified approach for now
+    
+    // Listen for storage changes to detect if sidebar state is tracked elsewhere
+    chrome.runtime.onMessage.addListener((message) => {
+      if (message.type === 'SIDEPANEL_STATE_CHANGED') {
+        this.isSidebarOpen = message.payload.isOpen;
+        this.updateButtonIcon();
+      }
+    });
   }
 
   public show() {
@@ -898,6 +951,7 @@ class FloatingSearchBar {
     console.log('🔧 FloatingSearchBar constructor called');
     this.createFloatingSearchBar();
     this.setupKeyboardShortcut();
+    this.setupSidepanelStateWatcher();
     console.log('✅ FloatingSearchBar constructor completed');
   }
 
@@ -916,7 +970,7 @@ class FloatingSearchBar {
     this.container.style.zIndex = '2147483647';
     this.container.style.fontFamily = '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", sans-serif';
     this.container.style.pointerEvents = 'none';
-    this.container.style.transition = 'all 0.3s ease';
+    this.container.style.transition = 'all 0.5s ease';
     this.container.style.opacity = '1';
 
     // Create the search bar
@@ -931,7 +985,7 @@ class FloatingSearchBar {
       pointer-events: auto !important;
       width: 140px !important;
       height: 56px !important;
-      transition: all 0.3s ease !important;
+      transition: all 0.5s ease !important;
       cursor: pointer !important;
       display: flex !important;
       align-items: center !important;
@@ -1047,7 +1101,7 @@ class FloatingSearchBar {
     
     setTimeout(() => {
       input.focus();
-    }, 150);
+    }, 250);
   }
 
   private collapseSearchBar(searchBar: HTMLDivElement, searchIcon: HTMLDivElement, expandedContent: HTMLDivElement) {
@@ -1072,17 +1126,30 @@ class FloatingSearchBar {
     try {
       console.log('📤 Sending FLOAT_QUERY message to background script...');
       
+      // Check if sidebar is open by trying to detect sidepanel state
+      // If sidebar is open, we want to add to existing conversation
+      const isSidebarOpen = await this.checkIfSidebarOpen();
+      
       // Send query to sidepanel via background script
       const response = await chrome.runtime.sendMessage({
         type: MessageType.FLOAT_QUERY,
-        payload: { query, source: 'floating' }
+        payload: { 
+          query, 
+          source: 'floating',
+          appendToExisting: isSidebarOpen // Flag to indicate we want to append to existing conversation
+        }
       });
       
       console.log('📥 Background script response:', response);
 
-      // Open sidepanel
-      console.log('🔄 Opening sidepanel...');
-      await this.openSidepanel();
+      // Only open sidepanel if not already open
+      if (!isSidebarOpen) {
+        console.log('🔄 Opening sidepanel...');
+        await this.openSidepanel();
+      } else {
+        console.log('✅ Sidebar already open, query sent to existing conversation');
+        // Don't call openSidepanel() when sidebar is already open to avoid closing it
+      }
       
       // Clear the input field
       if (inputElement) {
@@ -1104,6 +1171,29 @@ class FloatingSearchBar {
       console.log('✅ handleSearch completed successfully');
     } catch (error) {
       console.error('💥 Error handling floating search:', error);
+    }
+  }
+
+  private async checkIfSidebarOpen(): Promise<boolean> {
+    try {
+      // Query the background script for the actual sidepanel state
+      const response = await chrome.runtime.sendMessage({
+        type: MessageType.GET_SIDEPANEL_STATE
+      });
+      
+      if (response && response.success) {
+        console.log('📊 Sidepanel state from background:', response.data);
+        return response.data.isOpen || false;
+      }
+      
+      // Fallback: check session storage
+      const result = await chrome.storage.session.get('sidepanel-state');
+      const isOpen = result['sidepanel-state']?.isOpen || false;
+      console.log('📊 Sidepanel state from session storage:', isOpen);
+      return isOpen;
+    } catch (error) {
+      console.log('⚠️ Could not determine sidebar state:', error);
+      return false; // Default to closed to avoid accidentally closing sidebar
     }
   }
 
@@ -1132,6 +1222,42 @@ class FloatingSearchBar {
       
       // Note: Ctrl+I / Cmd+I is handled by the manifest command and background script
     });
+  }
+
+  private setupSidepanelStateWatcher() {
+    console.log('👁️ Setting up sidepanel state watcher');
+    
+    // Check sidepanel state periodically and update visibility accordingly
+    const checkSidepanelState = async () => {
+      try {
+        const isSidebarOpen = await this.checkIfSidebarOpen();
+        
+        // Hide floating search bar when sidepanel is open
+        if (isSidebarOpen) {
+          if (this.isEnabled) {
+            console.log('🙈 Hiding floating search bar (sidepanel is open)');
+            this.hide();
+            this.setEnabled(false);
+          }
+        } else {
+          // Show floating search bar when sidepanel is closed (if it was enabled before)
+          if (!this.isEnabled) {
+            console.log('👀 Showing floating search bar (sidepanel is closed)');
+            this.setEnabled(true);
+            this.show();
+          }
+        }
+      } catch (error) {
+        console.log('⚠️ Error checking sidepanel state:', error);
+      }
+    };
+
+    // Check immediately and then periodically
+    checkSidepanelState();
+    const interval = setInterval(checkSidepanelState, 1000); // Check every second
+
+    // Store interval for potential cleanup
+    (this as any).sidepanelStateInterval = interval;
   }
 
   public show() {
@@ -1187,6 +1313,12 @@ class FloatingSearchBar {
   }
 
   public destroy() {
+    // Clean up interval
+    if ((this as any).sidepanelStateInterval) {
+      clearInterval((this as any).sidepanelStateInterval);
+      (this as any).sidepanelStateInterval = null;
+    }
+    
     if (this.container) {
       this.container.remove();
       this.container = null;
@@ -1249,11 +1381,12 @@ class ContentScript {
         if (settings.ui?.floatingSearchEnabled) {
           console.log('✅ Floating search bar is enabled, creating component...');
           console.log('🔨 About to call new FloatingSearchBar()');
+          console.log(this.floatingSearchBar);
           try {
             this.floatingSearchBar = new FloatingSearchBar();
             console.log('🔨 FloatingSearchBar constructor completed');
-            this.floatingSearchBar.setEnabled(true);
-            console.log('✅ Floating search bar created and enabled');
+            // Don't enable immediately - let the sidepanel state watcher determine visibility
+            console.log('✅ Floating search bar created (visibility managed by sidepanel state watcher)');
           } catch (error) {
             console.error('💥 Error creating FloatingSearchBar:', error);
           }
