@@ -72,7 +72,7 @@ export interface ToolProvider {
   /**
    * Get Zod schemas for AI SDK - returns tool name to Zod schema mapping
    */
-  getZodSchemas?(): Map<string, { description: string; schema: any }>;
+  getZodSchemas?(): Map<string, { description: string; schema: any; outputSchema?: any }>;
 }
 
 /**

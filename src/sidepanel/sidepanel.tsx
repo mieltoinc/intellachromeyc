@@ -152,10 +152,22 @@ const SidePanelInner: React.FC = () => {
         ? currentPageInfo.content 
         : undefined;
       
+      // Convert chatMessages to conversation history format (exclude the current message we just added)
+      // We'll pass all previous messages to maintain conversation context
+      const conversationHistory = chatMessages.map(msg => ({
+        role: msg.role,
+        content: msg.content,
+      }));
+      
       // Use traditional API (which now uses AI SDK internally)
       const response = await chrome.runtime.sendMessage({
         type: MessageType.ASK_INTELLA,
-        payload: { question: currentQuery, context, model: selectedModel },
+        payload: { 
+          question: currentQuery, 
+          context, 
+          model: selectedModel,
+          conversationHistory, // Pass the conversation history
+        },
       });
 
       if (response.success) {
@@ -179,9 +191,19 @@ const SidePanelInner: React.FC = () => {
           ? currentPageInfo.content 
           : undefined;
         
+        // Include conversation history in fallback as well
+        const conversationHistory = chatMessages.map(msg => ({
+          role: msg.role,
+          content: msg.content,
+        }));
+        
         const response = await chrome.runtime.sendMessage({
           type: MessageType.ASK_INTELLA,
-          payload: { question: currentQuery, context },
+          payload: { 
+            question: currentQuery, 
+            context,
+            conversationHistory,
+          },
         });
 
         if (response.success) {
