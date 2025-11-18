@@ -55,6 +55,43 @@ interface Memory {
   archived: boolean;
 }
 
+// Shared utility for sidepanel state monitoring
+class SidepanelStateMonitor {
+  private static intervals: Set<number> = new Set();
+  
+  public static createStateWatcher(callback: (isOpen: boolean) => void): () => void {
+    const checkSidepanelState = async () => {
+      try {
+        const response = await chrome.runtime.sendMessage({
+          type: MessageType.GET_SIDEPANEL_STATE
+        });
+        
+        if (response && response.success) {
+          callback(response.data.isOpen);
+        }
+      } catch (error) {
+        // Silently fail - this is a background operation
+      }
+    };
+
+    // Check immediately and then periodically
+    checkSidepanelState();
+    const interval = setInterval(checkSidepanelState, 1000) as any;
+    this.intervals.add(interval);
+
+    // Return cleanup function
+    return () => {
+      clearInterval(interval);
+      this.intervals.delete(interval);
+    };
+  }
+
+  public static cleanup() {
+    this.intervals.forEach(interval => clearInterval(interval));
+    this.intervals.clear();
+  }
+}
+
 // Inline DOMReader class to avoid ES module imports
 class DOMReader {
   static extractPageContent() {
@@ -215,6 +252,7 @@ class FloatingSidepanelToggle {
   private button: HTMLButtonElement | null = null;
   private isVisible = true;
   private isSidebarOpen = false;
+  private cleanup: (() => void) | null = null;
 
   constructor() {
     this.createFloatingButton();
@@ -332,15 +370,11 @@ class FloatingSidepanelToggle {
   }
 
   private setupSidepanelStateListener() {
-    // Listen for messages from background script about sidepanel state
-    // Note: Since we can't easily track sidepanel state from content script,
-    // we'll use our local state and update it based on user interactions
-    // This is a simplified approach for now
-    
-    // Listen for storage changes to detect if sidebar state is tracked elsewhere
-    chrome.runtime.onMessage.addListener((message) => {
-      if (message.type === 'SIDEPANEL_STATE_CHANGED') {
-        this.isSidebarOpen = message.payload.isOpen;
+    // Use shared sidepanel state monitor
+    this.cleanup = SidepanelStateMonitor.createStateWatcher((isOpen: boolean) => {
+      if (isOpen !== this.isSidebarOpen) {
+        console.log('🔄 Sidepanel toggle button: state changed:', this.isSidebarOpen, '->', isOpen);
+        this.isSidebarOpen = isOpen;
         this.updateButtonIcon();
       }
     });
@@ -369,6 +403,10 @@ class FloatingSidepanelToggle {
   }
 
   public destroy() {
+    if (this.cleanup) {
+      this.cleanup();
+      this.cleanup = null;
+    }
     if (this.container) {
       this.container.remove();
       this.container = null;
@@ -946,6 +984,8 @@ class FloatingSearchBar {
   private container: HTMLDivElement | null = null;
   private isExpanded = false;
   private isEnabled = false;
+  private cleanup: (() => void) | null = null;
+  private isSidepanelOpen = false;
 
   constructor() {
     console.log('🔧 FloatingSearchBar constructor called');
@@ -1128,7 +1168,7 @@ class FloatingSearchBar {
       
       // Check if sidebar is open by trying to detect sidepanel state
       // If sidebar is open, we want to add to existing conversation
-      const isSidebarOpen = await this.checkIfSidebarOpen();
+      const isSidebarOpen = this.isSidepanelOpen;
       
       // Send query to sidepanel via background script
       const response = await chrome.runtime.sendMessage({
@@ -1174,28 +1214,6 @@ class FloatingSearchBar {
     }
   }
 
-  private async checkIfSidebarOpen(): Promise<boolean> {
-    try {
-      // Query the background script for the actual sidepanel state
-      const response = await chrome.runtime.sendMessage({
-        type: MessageType.GET_SIDEPANEL_STATE
-      });
-      
-      if (response && response.success) {
-        console.log('📊 Sidepanel state from background:', response.data);
-        return response.data.isOpen || false;
-      }
-      
-      // Fallback: check session storage
-      const result = await chrome.storage.session.get('sidepanel-state');
-      const isOpen = result['sidepanel-state']?.isOpen || false;
-      console.log('📊 Sidepanel state from session storage:', isOpen);
-      return isOpen;
-    } catch (error) {
-      console.log('⚠️ Could not determine sidebar state:', error);
-      return false; // Default to closed to avoid accidentally closing sidebar
-    }
-  }
 
   private async openSidepanel() {
     try {
@@ -1227,37 +1245,26 @@ class FloatingSearchBar {
   private setupSidepanelStateWatcher() {
     console.log('👁️ Setting up sidepanel state watcher');
     
-    // Check sidepanel state periodically and update visibility accordingly
-    const checkSidepanelState = async () => {
-      try {
-        const isSidebarOpen = await this.checkIfSidebarOpen();
-        
-        // Hide floating search bar when sidepanel is open
-        if (isSidebarOpen) {
-          if (this.isEnabled) {
-            console.log('🙈 Hiding floating search bar (sidepanel is open)');
-            this.hide();
-            this.setEnabled(false);
-          }
-        } else {
-          // Show floating search bar when sidepanel is closed (if it was enabled before)
-          if (!this.isEnabled) {
-            console.log('👀 Showing floating search bar (sidepanel is closed)');
-            this.setEnabled(true);
-            this.show();
-          }
+    // Use shared sidepanel state monitor
+    this.cleanup = SidepanelStateMonitor.createStateWatcher((isSidebarOpen: boolean) => {
+      this.isSidepanelOpen = isSidebarOpen;
+      
+      // Hide floating search bar when sidepanel is open
+      if (isSidebarOpen) {
+        if (this.isEnabled) {
+          console.log('🙈 Hiding floating search bar (sidepanel is open)');
+          this.hide();
+          this.setEnabled(false);
         }
-      } catch (error) {
-        console.log('⚠️ Error checking sidepanel state:', error);
+      } else {
+        // Show floating search bar when sidepanel is closed (if it was enabled before)
+        if (!this.isEnabled) {
+          console.log('👀 Showing floating search bar (sidepanel is closed)');
+          this.setEnabled(true);
+          this.show();
+        }
       }
-    };
-
-    // Check immediately and then periodically
-    checkSidepanelState();
-    const interval = setInterval(checkSidepanelState, 1000); // Check every second
-
-    // Store interval for potential cleanup
-    (this as any).sidepanelStateInterval = interval;
+    });
   }
 
   public show() {
@@ -1313,10 +1320,9 @@ class FloatingSearchBar {
   }
 
   public destroy() {
-    // Clean up interval
-    if ((this as any).sidepanelStateInterval) {
-      clearInterval((this as any).sidepanelStateInterval);
-      (this as any).sidepanelStateInterval = null;
+    if (this.cleanup) {
+      this.cleanup();
+      this.cleanup = null;
     }
     
     if (this.container) {
