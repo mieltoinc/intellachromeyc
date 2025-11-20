@@ -5,8 +5,8 @@
 
 import React, { useState, useEffect, useRef, useReducer } from 'react';
 import ReactDOM from 'react-dom/client';
-import { Send, Search, BookOpen, Sparkles, Settings as SettingsIcon, RefreshCw, Plus, CheckCircle, AlertCircle, Loader2, Menu, Eye, EyeOff, Zap, Mic, MicOff, X } from 'lucide-react';
-import { MessageType } from '@/types/messages';
+import { Send, Search, BookOpen, Sparkles, Settings as SettingsIcon, RefreshCw, Plus, CheckCircle, AlertCircle, Loader2, Menu, Eye, EyeOff, Zap, Mic, MicOff, X, AtSign, PhoneOff } from 'lucide-react';
+import { MessageType, TabInfo } from '@/types/messages';
 import { Memory, UserSettings } from '@/types/memory';
 import { mieltoAPI } from '@/utils/api';
 import { QuickActionsPopover } from '@/components/QuickActionsPopover';
@@ -14,6 +14,8 @@ import { ChatMenuPopover } from '@/components/ChatMenuPopover';
 import { ConversationSwitcher } from '@/components/ConversationSwitcher';
 import { LoginScreen } from '@/components/LoginScreen';
 import { ModelSelector } from '@/components/ModelSelector';
+import { TabSelector } from '@/components/TabSelector';
+import { MentionInput } from '@/components/MentionInput';
 import { conversationReducer, initialConversationState } from '@/reducers/conversationReducer';
 import { listConversations, createConversation, deleteConversation, getConversationWithMessages } from '@/handlers/conversation.handler';
 import type { ConversationWithStats } from '@/handlers/conversation.handler';
@@ -50,6 +52,10 @@ const SidePanelInner: React.FC = () => {
   const [showChatMenu, setShowChatMenu] = useState(false);
   const [showConversationSwitcher, setShowConversationSwitcher] = useState(false);
   const [conversationState, dispatch] = useReducer(conversationReducer, initialConversationState);
+  
+  // Tab attachment state
+  const [showTabSelector, setShowTabSelector] = useState(false);
+  const [attachedTabs, setAttachedTabs] = useState<TabInfo[]>([]);
   const [uploadProgress, setUploadProgress] = useState<{
     isUploading: boolean;
     fileName?: string;
@@ -79,11 +85,13 @@ const SidePanelInner: React.FC = () => {
     favicon?: string;
     hasInfo: boolean;
     content?: string;
+    tabId?: number;
   }>({ title: 'Current Page Context', hasInfo: false });
   const [faviconError, setFaviconError] = useState(false);
 
   const chatEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const tabSelectorButtonRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     console.log('📚 SidePanel: useEffect mounting - loading memories...');
@@ -130,105 +138,6 @@ const SidePanelInner: React.FC = () => {
   }, [chatMessages]);
 
 
-  const handleSendMessage = async () => {
-    if (!query.trim() || isLoading) return;
-
-    const userMessage: ChatMessage = {
-      role: 'user',
-      content: query,
-      timestamp: new Date(),
-    };
-
-    setChatMessages(prev => [...prev, userMessage]);
-    const currentQuery = query;
-    setQuery('');
-    setIsLoading(true);
-
-    try {
-      console.log('🤖 Using AI SDK for chat...');
-      
-      // Include current page context if available
-      const context = currentPageInfo.hasInfo && currentPageInfo.content 
-        ? currentPageInfo.content 
-        : undefined;
-      
-      // Convert chatMessages to conversation history format (exclude the current message we just added)
-      // We'll pass all previous messages to maintain conversation context
-      const conversationHistory = chatMessages.map(msg => ({
-        role: msg.role,
-        content: msg.content,
-      }));
-      
-      // Use traditional API (which now uses AI SDK internally)
-      const response = await chrome.runtime.sendMessage({
-        type: MessageType.ASK_INTELLA,
-        payload: { 
-          question: currentQuery, 
-          context, 
-          model: selectedModel,
-          conversationHistory, // Pass the conversation history
-        },
-      });
-
-      if (response.success) {
-        const assistantMessage: ChatMessage = {
-          role: 'assistant',
-          content: response.data,
-          timestamp: new Date(),
-          // Note: usedMemories will be populated by the backend automatically
-          toolExecutions: (response as any).toolExecutions,
-        };
-        setChatMessages(prev => [...prev, assistantMessage]);
-      } else {
-        throw new Error(response.error);
-      }
-    } catch (error) {
-      console.error('💥 Chat error:', error);
-      
-      try {
-        // Include current page context if available
-        const context = currentPageInfo.hasInfo && currentPageInfo.content 
-          ? currentPageInfo.content 
-          : undefined;
-        
-        // Include conversation history in fallback as well
-        const conversationHistory = chatMessages.map(msg => ({
-          role: msg.role,
-          content: msg.content,
-        }));
-        
-        const response = await chrome.runtime.sendMessage({
-          type: MessageType.ASK_INTELLA,
-          payload: { 
-            question: currentQuery, 
-            context,
-            conversationHistory,
-          },
-        });
-
-        if (response.success) {
-          const assistantMessage: ChatMessage = {
-            role: 'assistant',
-            content: `${response.data}`,
-            timestamp: new Date(),
-          };
-          setChatMessages(prev => [...prev, assistantMessage]);
-        } else {
-          throw new Error(response.error);
-        }
-      } catch (fallbackError) {
-        console.error('💥 Fallback also failed:', fallbackError);
-        const errorMessage: ChatMessage = {
-          role: 'assistant',
-          content: 'Sorry, I encountered an error. Please try again.',
-          timestamp: new Date(),
-        };
-        setChatMessages(prev => [...prev, errorMessage]);
-      }
-    } finally {
-      setIsLoading(false);
-    }
-  };
 
   // Streaming functionality for future use
   // const handleSendMessageStreaming = async () => {
@@ -501,20 +410,23 @@ const SidePanelInner: React.FC = () => {
           title: tab.title,
           favicon: faviconUrl,
           hasInfo: true,
-          content: pageContent
+          content: pageContent,
+          tabId: tab.id
         });
       } else {
         console.log('⚠️ Could not get tab information, using fallback');
         setCurrentPageInfo({
           title: 'Current Page Context',
-          hasInfo: false
+          hasInfo: false,
+          tabId: undefined
         });
       }
     } catch (error) {
       console.error('❌ Error loading current page info:', error);
       setCurrentPageInfo({
         title: 'Current Page Context',
-        hasInfo: false
+        hasInfo: false,
+        tabId: undefined
       });
     }
   };
@@ -523,7 +435,8 @@ const SidePanelInner: React.FC = () => {
     setCurrentPageInfo({
       title: 'Current Page Context',
       hasInfo: false,
-      content: undefined
+      content: undefined,
+      tabId: undefined
     });
   };
 
@@ -1257,6 +1170,135 @@ const SidePanelInner: React.FC = () => {
     }
   };
 
+  // Tab attachment handlers
+  const handleOpenTabSelector = () => {
+    setShowTabSelector(true);
+  };
+
+  const handleSelectTab = (tab: TabInfo) => {
+    // Check if tab is already attached
+    if (!attachedTabs.some(attachedTab => attachedTab.id === tab.id)) {
+      setAttachedTabs(prev => [...prev, tab]);
+      console.log('📑 Tab attached:', tab.title, '- Total attached:', attachedTabs.length + 1);
+    }
+  };
+
+  const handleRemoveTab = (tabId: number) => {
+    setAttachedTabs(prev => prev.filter(tab => tab.id !== tabId));
+  };
+
+  const handleTabMention = (tab: TabInfo) => {
+    // Add to attached tabs if not already present
+    if (!attachedTabs.some(attachedTab => attachedTab.id === tab.id)) {
+      setAttachedTabs(prev => [...prev, tab]);
+    }
+  };
+
+  const handleSendMessageWithTabs = async () => {
+    if (!query.trim() || isLoading) return;
+
+    const userMessage: ChatMessage = {
+      role: 'user',
+      content: query,
+      timestamp: new Date(),
+    };
+
+    setChatMessages(prev => [...prev, userMessage]);
+    const currentQuery = query;
+    setQuery('');
+    setIsLoading(true);
+
+    try {
+      console.log('🤖 Sending message with', attachedTabs.length, 'attached tabs...');
+
+      // Include current page context if available
+      let context = currentPageInfo.hasInfo && currentPageInfo.content
+        ? currentPageInfo.content
+        : '';
+
+      // Add attached tabs content to context
+      if (attachedTabs.length > 0) {
+        console.log('📑 Retrieving content from attached tabs:', attachedTabs.map(t => t.title));
+        const tabContexts = [];
+        for (const tab of attachedTabs) {
+          try {
+            console.log('📄 Getting content from tab:', tab.title);
+            const tabContentResponse = await chrome.runtime.sendMessage({
+              type: MessageType.GET_TAB_CONTENT,
+              payload: { tabId: tab.id },
+            });
+
+            if (tabContentResponse.success && tabContentResponse.data?.content) {
+              const content = tabContentResponse.data.content;
+              const tabContext = `\n--- Content from tab: ${tab.title} (${tab.url}) ---\n${content.title ? `Title: ${content.title}\n` : ''}${content.description ? `Description: ${content.description}\n` : ''}${content.content || 'Content not available'}`;
+              tabContexts.push(tabContext);
+              console.log('✅ Retrieved content from tab:', tab.title, '- length:', content.content?.length || 0);
+            } else {
+              console.warn('⚠️ Failed to get content from tab:', tab.title, tabContentResponse.error);
+              tabContexts.push(`\n--- Reference to tab: ${tab.title} (${tab.url}) ---\nNote: Content from this tab could not be retrieved.`);
+            }
+          } catch (error) {
+            console.warn('❌ Error getting content from tab:', tab.title, error);
+            tabContexts.push(`\n--- Reference to tab: ${tab.title} (${tab.url}) ---\nNote: Content from this tab could not be retrieved.`);
+          }
+        }
+
+        if (tabContexts.length > 0) {
+          const tabContextString = tabContexts.join('\n');
+          context = context
+            ? `${context}\n\n--- Additional Context from Attached Tabs ---${tabContextString}`
+            : `--- Context from Attached Tabs ---${tabContextString}`;
+          console.log('📦 Total context with tabs - length:', context.length, 'characters');
+        }
+      }
+
+      // Convert chatMessages to conversation history format
+      const conversationHistory = chatMessages.map(msg => ({
+        role: msg.role,
+        content: msg.content,
+      }));
+
+      console.log('🚀 Sending to AI with context length:', context.length);
+      const response = await chrome.runtime.sendMessage({
+        type: MessageType.ASK_INTELLA,
+        payload: {
+          question: currentQuery,
+          context,
+          model: selectedModel,
+          conversationHistory,
+          attachedTabIds: attachedTabs.map(t => t.id), // Include tab IDs for reference
+        },
+      });
+
+      if (response.success) {
+        const assistantMessage: ChatMessage = {
+          role: 'assistant',
+          content: response.data,
+          timestamp: new Date(),
+          toolExecutions: (response as any).toolExecutions,
+        };
+        setChatMessages(prev => [...prev, assistantMessage]);
+
+        // Clear attached tabs after successful message
+        console.log('🧹 Clearing attached tabs after successful message');
+        setAttachedTabs([]);
+      } else {
+        throw new Error(response.error);
+      }
+    } catch (error) {
+      console.error('💥 Chat error:', error);
+
+      const errorMessage: ChatMessage = {
+        role: 'assistant',
+        content: 'Sorry, I encountered an error. Please try again.',
+        timestamp: new Date(),
+      };
+      setChatMessages(prev => [...prev, errorMessage]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   return (
     <div className="h-full flex flex-col bg-white dark:bg-darkBg-primary">
       {/* Header with model selector on left and menu on right */}
@@ -1493,34 +1535,101 @@ const SidePanelInner: React.FC = () => {
 
             {/* Input */}
             <div className="border-t border-gray-200 dark:border-darkBg-secondary bg-white dark:bg-darkBg-primary p-2">
-              {/* Context indicator */}
-              <div id="current-page-context-container" className="px-2 flex items-center gap-2" style={{ width: '50%' }}>
-                <button id="current-page-context" className="flex justify-between items-center gap-2 px-2 py-1 bg-gray-100 dark:bg-darkBg-secondary hover:bg-gray-200 dark:hover:bg-darkBg-tertiary rounded-lg transition flex-1" style={{ cursor: 'pointer', width: '50%' }}>
-                  {currentPageInfo.hasInfo && currentPageInfo.favicon && !faviconError ? (
-                    <img 
-                      src={currentPageInfo.favicon} 
-                      alt="Page favicon" 
-                      className="w-4 h-4"
-                      onError={() => {
-                        // If favicon fails to load, set error flag to show Zap icon
-                        setFaviconError(true);
-                      }}
-                    />
-                  ) : (
-                    <Zap size={16} className="text-gray-600 dark:text-darkText-secondary" />
-                  )}
-                  <span className="text-sm text-gray-700 dark:text-darkText-secondary truncate">{currentPageInfo.title}</span>
-                  {currentPageInfo.hasInfo && (
+              {/* Context indicator and attached tabs */}
+              <div className="px-2 mb-2">
+                {/* All tabs (current page + attached) in pill format with @ button inline */}
+                <div className="flex items-center gap-1 overflow-x-auto py-1 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+                  {/* @ button for tab selection - inline with tabs */}
                   <button
-                    onClick={clearCurrentPageInfo}
-                    className="p-2 text-gray-600 dark:text-darkText-secondary hover:text-gray-900 dark:hover:text-darkText-primary hover:bg-gray-100 dark:hover:bg-darkBg-tertiary rounded-lg transition"
-                    title="Clear page context"
+                    ref={tabSelectorButtonRef}
+                    onClick={handleOpenTabSelector}
+                    className="flex-shrink-0 p-1.5 text-gray-600 dark:text-darkText-secondary hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition border border-gray-300 dark:border-darkBg-secondary"
+                    title="Attach tab"
                   >
-                    <X size={16} />
+                    <AtSign size={14} />
                   </button>
-                )}
-                </button>
-                
+                  <TabSelector
+                    isOpen={showTabSelector}
+                    onClose={() => setShowTabSelector(false)}
+                    onSelectTab={handleSelectTab}
+                    currentTabId={currentPageInfo.tabId}
+                    buttonRef={tabSelectorButtonRef}
+                  />
+
+                  {/* Current page context as pill */}
+                  <div
+                    className="flex items-center gap-1.5 px-2 py-1 bg-green-100 dark:bg-green-900/50 text-green-800 dark:text-green-200 rounded-lg text-xs whitespace-nowrap flex-shrink-0"
+                    title={`Current page: ${currentPageInfo.title}${currentPageInfo.hasInfo ? `\n${currentPageInfo.content?.substring(0, 100) || 'Page content available'}` : '\nNo page context available'}`}
+                  >
+                    <div className="w-3 h-3 flex-shrink-0">
+                      {currentPageInfo.hasInfo && currentPageInfo.favicon && !faviconError ? (
+                        <img
+                          src={currentPageInfo.favicon}
+                          alt=""
+                          className="w-3 h-3"
+                          onError={() => {
+                            setFaviconError(true);
+                          }}
+                        />
+                      ) : (
+                        <Zap size={10} className="text-green-600 dark:text-green-300" />
+                      )}
+                    </div>
+                    <span className="font-medium">
+                      {currentPageInfo.title.length > 20 ? currentPageInfo.title.substring(0, 20) + '...' : currentPageInfo.title}
+                    </span>
+                    {currentPageInfo.hasInfo && (
+                      <button
+                        onClick={clearCurrentPageInfo}
+                        className="p-0.5 hover:bg-green-200 dark:hover:bg-green-800 rounded transition"
+                        title="Clear page context"
+                      >
+                        <X size={10} />
+                      </button>
+                    )}
+                  </div>
+                  
+                  {/* Attached tabs */}
+                  {attachedTabs.map((tab) => (
+                    <div
+                      key={tab.id}
+                      className="flex items-center gap-1.5 px-2 py-1 bg-blue-100 dark:bg-blue-900/50 text-blue-800 dark:text-blue-200 rounded-lg text-xs whitespace-nowrap flex-shrink-0"
+                      title={`${tab.title}\n${tab.url}`}
+                    >
+                      <div className="w-3 h-3 flex-shrink-0">
+                        {tab.favIconUrl ? (
+                          <img
+                            src={tab.favIconUrl}
+                            alt=""
+                            className="w-3 h-3"
+                            onError={(e) => {
+                              const target = e.target as HTMLImageElement;
+                              target.style.display = 'none';
+                              const parent = target.parentElement;
+                              if (parent) {
+                                const icon = document.createElement('div');
+                                icon.innerHTML = '<div class="w-3 h-3 flex items-center justify-center text-blue-600 dark:text-blue-300"><svg class="w-2.5 h-2.5" fill="currentColor" viewBox="0 0 20 20"><path d="M10 12a2 2 0 100-4 2 2 0 000 4z"/><path fillRule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clipRule="evenodd"/></svg></div>';
+                                parent.appendChild(icon.firstChild as Node);
+                              }
+                            }}
+                          />
+                        ) : (
+                          <Zap size={10} className="text-blue-600 dark:text-blue-300" />
+                        )}
+                      </div>
+                      <span className="font-medium">
+                        {tab.title.length > 20 ? tab.title.substring(0, 20) + '...' : tab.title}
+                      </span>
+                      <button
+                        onClick={() => handleRemoveTab(tab.id)}
+                        className="p-0.5 hover:bg-blue-200 dark:hover:bg-blue-800 rounded transition"
+                        title="Remove tab"
+                      >
+                        <X size={10} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
               </div>
               
               {/* Voice Chat Controls */}
@@ -1546,7 +1655,7 @@ const SidePanelInner: React.FC = () => {
                         className="p-2 bg-red-500 hover:bg-red-600 text-white rounded-lg transition"
                         title="End voice chat"
                       >
-                        <MicOff size={16} />
+                        <PhoneOff size={16} />
                       </button>
                     </div>
                   </div>
@@ -1589,17 +1698,15 @@ const SidePanelInner: React.FC = () => {
                   />
                 </div>
 
-                <div className="flex-1 relative">
-                  <input
-                    type="text"
-                    value={query}
-                    onChange={(e) => setQuery(e.target.value)}
-                    onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
-                    placeholder="Ask anything"
-                    className="w-full px-2 py-3 focus:outline-none bg-transparent text-gray-900 dark:text-darkText-primary placeholder:text-gray-500 dark:placeholder:text-darkText-tertiary"
-                    disabled={isLoading}
-                  />
-                </div>
+                <MentionInput
+                  value={query}
+                  onChange={setQuery}
+                  onKeyPress={(e) => e.key === 'Enter' && handleSendMessageWithTabs()}
+                  onTabMention={handleTabMention}
+                  placeholder="Ask anything (use @ to mention tabs)"
+                  disabled={isLoading}
+                  className="w-full px-2 py-3 focus:outline-none bg-transparent text-gray-900 dark:text-darkText-primary placeholder:text-gray-500 dark:placeholder:text-darkText-tertiary"
+                />
                 
                 {/* Voice Chat Button */}
                 {!isVoiceChatActive ? (
@@ -1618,7 +1725,7 @@ const SidePanelInner: React.FC = () => {
                 ) : null}
                 
                 <button
-                  onClick={handleSendMessage}
+                  onClick={handleSendMessageWithTabs}
                   disabled={isLoading || !query.trim()}
                   className="px-3 py-3 text-gray-600 dark:text-darkText-secondary hover:text-gray-900 dark:hover:text-darkText-primary transition disabled:opacity-50 disabled:cursor-not-allowed"
                   title="Send message"

@@ -70,6 +70,10 @@ export enum MessageType {
   REMOVE_BLOCKED_DOMAIN = 'REMOVE_BLOCKED_DOMAIN',
   CHECK_DOMAIN_BLOCKED = 'CHECK_DOMAIN_BLOCKED',
   BLOCKED_DOMAINS_UPDATED = 'BLOCKED_DOMAINS_UPDATED',
+  
+  // Feature 5: Attach Tab enhancements
+  GET_OPEN_TABS = 'GET_OPEN_TABS',
+  GET_TAB_CONTENT = 'GET_TAB_CONTENT',
 }
 
 export interface Message<T = any> {
@@ -138,5 +142,18 @@ export interface BlockedDomainPayload {
 export interface DomainBlockedResponse {
   isBlocked: boolean;
   matchedRule?: string;
+}
+
+// Feature 5: Attach Tab enhancements
+export interface TabInfo {
+  id: number;
+  title: string;
+  url: string;
+  favIconUrl?: string;
+  active?: boolean;
+}
+
+export interface GetTabContentPayload {
+  tabId: number;
 }
 

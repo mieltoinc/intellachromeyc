@@ -305,6 +305,13 @@ async function handleMessage(message: Message, _sender: chrome.runtime.MessageSe
       case MessageType.GET_SIDEPANEL_STATE:
         return await handleGetSidepanelState();
 
+      // Feature 5: Attach Tab enhancements
+      case MessageType.GET_OPEN_TABS:
+        return await handleGetOpenTabs();
+
+      case MessageType.GET_TAB_CONTENT:
+        return await handleGetTabContent(message.payload);
+
       default:
         return { success: false, error: 'Unknown message type' };
     }
@@ -1152,3 +1159,104 @@ chrome.tabs.onUpdated.addListener(async (_tabId, changeInfo, tab) => {
 // Update badge periodically
 setInterval(updateBadge, 60000); // Every minute
 updateBadge(); // Initial update
+
+// Feature 5: Attach Tab enhancements handlers
+async function handleGetOpenTabs(): Promise<MessageResponse> {
+  try {
+    console.log('📑 Getting open tabs...');
+    
+    // Query all tabs in the current window
+    const tabs = await chrome.tabs.query({ currentWindow: true });
+    
+    // Map to our TabInfo interface and filter out extension/chrome pages
+    const tabInfos = tabs
+      .filter(tab => 
+        tab.url && 
+        tab.id !== undefined &&
+        !tab.url.startsWith('chrome://') &&
+        !tab.url.startsWith('chrome-extension://') &&
+        !tab.url.startsWith('moz-extension://') &&
+        !tab.url.startsWith('about:')
+      )
+      .map(tab => ({
+        id: tab.id!,
+        title: tab.title || 'Untitled',
+        url: tab.url!,
+        favIconUrl: tab.favIconUrl,
+        active: tab.active,
+      }));
+    
+    console.log(`✅ Found ${tabInfos.length} open tabs`);
+    return { success: true, data: tabInfos };
+  } catch (error: any) {
+    console.error('❌ Failed to get open tabs:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+async function handleGetTabContent(payload: { tabId: number }): Promise<MessageResponse> {
+  try {
+    console.log('📄 Getting content from tab:', payload.tabId);
+    
+    // Get tab info first
+    const tab = await chrome.tabs.get(payload.tabId);
+    if (!tab || !tab.url) {
+      return { success: false, error: 'Tab not found or invalid' };
+    }
+    
+    // Check if tab is a valid web page
+    if (tab.url.startsWith('chrome://') || 
+        tab.url.startsWith('chrome-extension://') || 
+        tab.url.startsWith('about:')) {
+      return { success: false, error: 'Cannot get content from system pages' };
+    }
+    
+    try {
+      // Try to get content via content script
+      const response = await chrome.tabs.sendMessage(payload.tabId, {
+        type: MessageType.GET_PAGE_CONTENT,
+      });
+      
+      if (response && response.success) {
+        console.log('✅ Successfully retrieved tab content');
+        return {
+          success: true,
+          data: {
+            tabInfo: {
+              id: tab.id!,
+              title: tab.title || 'Untitled',
+              url: tab.url,
+              favIconUrl: tab.favIconUrl,
+            },
+            content: response.data,
+          },
+        };
+      } else {
+        throw new Error('Content script did not respond successfully');
+      }
+    } catch (contentError) {
+      console.warn('⚠️ Content script unavailable, providing basic tab info only:', contentError);
+      
+      // Fallback: provide basic tab information without content
+      return {
+        success: true,
+        data: {
+          tabInfo: {
+            id: tab.id!,
+            title: tab.title || 'Untitled',
+            url: tab.url,
+            favIconUrl: tab.favIconUrl,
+          },
+          content: {
+            title: tab.title || 'Untitled',
+            content: `Page from ${tab.url}`,
+            description: 'Content not available - tab may not have loaded yet or may be a restricted page.',
+          },
+        },
+      };
+    }
+  } catch (error: any) {
+    console.error('❌ Failed to get tab content:', error);
+    return { success: false, error: error.message };
+  }
+}
