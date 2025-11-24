@@ -1,0 +1,126 @@
+/**
+ * Markdown Content Styling
+ * Custom styles for rendered markdown content
+ */
+
+.markdown-content {
+  /* Smooth font rendering */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+}
+
+/* Code blocks */
+.markdown-content pre {
+  overflow-x: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(155, 155, 155, 0.5) transparent;
+}
+
+.markdown-content pre::-webkit-scrollbar {
+  height: 8px;
+}
+
+.markdown-content pre::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.markdown-content pre::-webkit-scrollbar-thumb {
+  background-color: rgba(155, 155, 155, 0.5);
+  border-radius: 4px;
+}
+
+.markdown-content pre::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(155, 155, 155, 0.7);
+}
+
+/* Inline code */
+.markdown-content code {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.9em;
+}
+
+/* Code block background in dark mode */
+.dark .markdown-content pre {
+  background-color: rgb(17, 24, 39) !important;
+}
+
+/* Links */
+.markdown-content a {
+  text-decoration: none;
+  transition: opacity 0.2s;
+}
+
+.markdown-content a:hover {
+  opacity: 0.8;
+}
+
+/* Lists - better spacing */
+.markdown-content ul,
+.markdown-content ol {
+  margin-left: 0.5rem;
+}
+
+.markdown-content li {
+  margin-bottom: 0.25rem;
+}
+
+/* Nested lists */
+.markdown-content li > ul,
+.markdown-content li > ol {
+  margin-top: 0.25rem;
+  margin-left: 1rem;
+}
+
+/* Blockquotes */
+.markdown-content blockquote {
+  background-color: rgba(59, 130, 246, 0.05);
+  padding: 0.5rem 1rem;
+  border-radius: 0.25rem;
+}
+
+.dark .markdown-content blockquote {
+  background-color: rgba(59, 130, 246, 0.1);
+}
+
+/* Tables */
+.markdown-content table {
+  border-collapse: collapse;
+  font-size: 0.9em;
+}
+
+/* Horizontal rules */
+.markdown-content hr {
+  border: none;
+  border-top: 1px solid;
+  opacity: 0.3;
+}
+
+/* First/last element spacing */
+.markdown-content > *:first-child {
+  margin-top: 0 !important;
+}
+
+.markdown-content > *:last-child {
+  margin-bottom: 0 !important;
+}
+
+/* Prevent text overflow in chat bubbles */
+.markdown-content {
+  max-width: 100%;
+}
+
+.markdown-content pre {
+  max-width: 100%;
+}
+
+/* Task lists (GitHub-flavored markdown) */
+.markdown-content input[type="checkbox"] {
+  margin-right: 0.5rem;
+}
+
+/* Strike-through text */
+.markdown-content del {
+  opacity: 0.7;
+}

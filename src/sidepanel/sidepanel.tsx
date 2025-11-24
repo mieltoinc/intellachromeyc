@@ -16,6 +16,7 @@ import { LoginScreen } from '@/components/LoginScreen';
 import { ModelSelector } from '@/components/ModelSelector';
 import { TabSelector } from '@/components/TabSelector';
 import { MentionInput } from '@/components/MentionInput';
+import { MarkdownRenderer } from '@/components/MarkdownRenderer';
 import { conversationReducer, initialConversationState } from '@/reducers/conversationReducer';
 import { listConversations, createConversation, deleteConversation, getConversationWithMessages } from '@/handlers/conversation.handler';
 import type { ConversationWithStats } from '@/handlers/conversation.handler';
@@ -1429,7 +1430,11 @@ const SidePanelInner: React.FC = () => {
                             : 'bg-gray-100 dark:bg-darkBg-secondary text-gray-900 dark:text-darkText-primary'
                           }`}
                       >
-                        <div className="text-sm leading-relaxed">{msg.content}</div>
+                        {msg.role === 'user' ? (
+                          <div className="text-sm leading-relaxed text-white">{msg.content}</div>
+                        ) : (
+                          <MarkdownRenderer content={msg.content} className="text-sm" />
+                        )}
                         {msg.toolExecutions && msg.toolExecutions.length > 0 && (
                           <div className="mt-2 pt-2 border-t border-gray-200 dark:border-darkBg-secondary">
                             <div className="text-xs text-gray-500 dark:text-darkText-tertiary mb-1.5 flex items-center gap-1">
