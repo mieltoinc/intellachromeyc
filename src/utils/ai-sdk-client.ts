@@ -158,6 +158,15 @@ export class AISDKClient {
       enableTools = true,
     } = options;
 
+    // Check if this is a model that doesn't support temperature
+    // Reasoning models (o1, o3) and GPT-5 models don't support temperature
+    const isReasoningModel = model.includes('o1') || model.includes('o3');
+    const isGPT5Model = model.toLowerCase().includes('gpt-5');
+    const supportsTemperature = !isReasoningModel && !isGPT5Model;
+
+    // Only pass temperature if the model supports it
+    const effectiveTemperature = supportsTemperature ? temperature : undefined;
+
     try {
       const apiKey = await this.getApiKey();
       
@@ -184,7 +193,31 @@ export class AISDKClient {
       const languageModel = openaiProvider.chat(model || 'gpt-4o');
 
       // Prepare messages for AI SDK
-      const conversationMessages = messages.map(msg => {
+      const conversationMessages = messages
+        .filter(msg => {
+          // Filter out any 'developer' role messages as they're not supported
+          if ((msg.role as any) === 'developer') {
+            console.warn('⚠️ Filtering out developer role message - not supported by AI models');
+            return false;
+          }
+          return true;
+        })
+        .map(msg => {
+          // For reasoning models and GPT-5, convert system messages to user messages
+          // These models don't support system messages and the AI SDK converts them to 'developer' which causes errors
+          if (msg.role === 'system' && (isReasoningModel || isGPT5Model)) {
+            console.log('🔄 Converting system message to user message for reasoning/GPT-5 model');
+            return {
+              ...msg,
+              role: 'user' as const,
+              content: typeof msg.content === 'string'
+                ? `[System Context] ${msg.content}`
+                : msg.content
+            };
+          }
+          return msg;
+        })
+        .map(msg => {
         if (msg.role === 'tool' && msg.tool_call_id) {
           // Check if tool result contains a screenshot and convert to image content
           try {
@@ -293,20 +326,28 @@ export class AISDKClient {
         console.log('📡 Using streaming mode');
         let streamResult: any;
         if (Object.keys(tools).length > 0) {
-          streamResult = streamText({
+          const streamConfig: any = {
             model: languageModel,
             messages: conversationMessages as any,
             tools,
-            temperature,
             stopWhen: stepCountIs(5),
-          } as any);
+          };
+          // Only add temperature if the model supports it
+          if (effectiveTemperature !== undefined) {
+            streamConfig.temperature = effectiveTemperature;
+          }
+          streamResult = streamText(streamConfig);
         } else {
           // No tools - simple generation
-          streamResult = streamText({
+          const streamConfig: any = {
             model: languageModel,
             messages: conversationMessages as any,
-            temperature,
-          });
+          };
+          // Only add temperature if the model supports it
+          if (effectiveTemperature !== undefined) {
+            streamConfig.temperature = effectiveTemperature;
+          }
+          streamResult = streamText(streamConfig);
         }
 
         // Collect streamed text chunks
@@ -337,20 +378,28 @@ export class AISDKClient {
         console.log('📝 Using non-streaming mode');
         let generateResult: any;
         if (Object.keys(tools).length > 0) {
-          generateResult = await generateText({
+          const generateConfig: any = {
             model: languageModel,
             messages: conversationMessages as any,
             tools,
-            temperature,
             maxSteps: 5,
-          } as any);
+          };
+          // Only add temperature if the model supports it
+          if (effectiveTemperature !== undefined) {
+            generateConfig.temperature = effectiveTemperature;
+          }
+          generateResult = await generateText(generateConfig);
         } else {
           // No tools - simple generation
-          generateResult = await generateText({
+          const generateConfig: any = {
             model: languageModel,
             messages: conversationMessages as any,
-            temperature,
-          });
+          };
+          // Only add temperature if the model supports it
+          if (effectiveTemperature !== undefined) {
+            generateConfig.temperature = effectiveTemperature;
+          }
+          generateResult = await generateText(generateConfig);
         }
 
         // Get final text and usage from result

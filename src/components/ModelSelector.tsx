@@ -14,18 +14,27 @@ export interface ModelOption {
 
 export const AVAILABLE_MODELS: ModelOption[] = [
   // OpenAI Models
+  { provider: 'openai', id: 'gpt-5.1', name: 'GPT-5.1' },
   { provider: 'openai', id: 'gpt-5', name: 'GPT-5' },
+  { provider: 'openai', id: 'gpt-5-mini', name: 'GPT-5 mini' },
+  { provider: 'openai', id: 'gpt-5-nano', name: 'GPT-5 nano' },
+  { provider: 'openai', id: 'gpt-4.1', name: 'GPT-4.1' },
   { provider: 'openai', id: 'gpt-4o', name: 'GPT-4o' },
   { provider: 'openai', id: 'gpt-4-turbo', name: 'GPT-4 Turbo' },
   { provider: 'openai', id: 'gpt-4', name: 'GPT-4' },
   
   // Anthropic Models
+  { provider: 'anthropic', id: 'claude-sonnet-4-5-20250929', name: 'Claude Sonnet 4.5' },
   { provider: 'anthropic', id: 'claude-3-5-sonnet-20241022', name: 'Claude 3.5 Sonnet' },
   { provider: 'anthropic', id: 'claude-3-opus-20240229', name: 'Claude 3 Opus' },
   { provider: 'anthropic', id: 'claude-3-sonnet-20240229', name: 'Claude 3 Sonnet' },
   { provider: 'anthropic', id: 'claude-3-haiku-20240307', name: 'Claude 3 Haiku' },
   
   // Gemini Models
+  { provider: 'gemini', id: 'gemini-3-pro-preview', name: 'Gemini 3 Pro' },
+  { provider: 'gemini', id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro' },
+  { provider: 'gemini', id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash' },
+  { provider: 'gemini', id: 'gemini-2.5-flash-lite', name: 'Gemini 2.5 Flash Lite' },
   { provider: 'gemini', id: 'gemini-2.0-flash-exp', name: 'Gemini 2.0 Flash' },
   { provider: 'gemini', id: 'gemini-1.5-pro', name: 'Gemini 1.5 Pro' },
   { provider: 'gemini', id: 'gemini-1.5-flash', name: 'Gemini 1.5 Flash' },

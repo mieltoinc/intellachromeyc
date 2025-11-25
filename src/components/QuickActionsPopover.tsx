@@ -1,5 +1,5 @@
 import React from 'react';
-import { Paperclip, Zap, Camera, Compass, Image, BookOpen, MoreHorizontal, ChevronRight, Crop } from 'lucide-react';
+import { Paperclip, Zap, Camera, Compass, Crop } from 'lucide-react';
 import { Popover } from './Popover';
 
 interface QuickActionsPopoverProps {
