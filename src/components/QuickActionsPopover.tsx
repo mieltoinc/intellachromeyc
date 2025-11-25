@@ -1,5 +1,5 @@
 import React from 'react';
-import { Paperclip, Zap, Camera, Compass, Image, BookOpen, MoreHorizontal, ChevronRight } from 'lucide-react';
+import { Paperclip, Zap, Camera, Compass, Image, BookOpen, MoreHorizontal, ChevronRight, Crop } from 'lucide-react';
 import { Popover } from './Popover';
 
 interface QuickActionsPopoverProps {
@@ -7,6 +7,7 @@ interface QuickActionsPopoverProps {
   onClose: () => void;
   onFileUpload: () => void;
   onScreenshot?: () => void;
+  onScreenshotRegion?: () => void;
   onAttachCurrentPage?: () => void;
   isUploading: boolean;
 }
@@ -16,6 +17,7 @@ export const QuickActionsPopover: React.FC<QuickActionsPopoverProps> = ({
   onClose,
   onFileUpload,
   onScreenshot,
+  onScreenshotRegion,
   onAttachCurrentPage,
   isUploading,
 }) => {
@@ -46,7 +48,7 @@ export const QuickActionsPopover: React.FC<QuickActionsPopoverProps> = ({
         >
           <Zap size={18} className="text-gray-600 dark:text-darkText-secondary" />
           <div className="flex-1">
-            <div className="text-sm font-medium text-gray-900 dark:text-darkText-primary">Attach tab</div>
+            <div className="text-sm font-medium text-gray-900 dark:text-darkText-primary">Attach Current Tab</div>
           </div>
         </button>
         
@@ -60,7 +62,18 @@ export const QuickActionsPopover: React.FC<QuickActionsPopoverProps> = ({
             <div className="text-sm font-medium text-gray-900 dark:text-darkText-primary">Attach screenshot</div>
           </div>
         </button>
-        
+
+        <button
+          onClick={onScreenshotRegion}
+          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left hover:bg-gray-50 dark:hover:bg-darkBg-tertiary transition"
+          disabled={isUploading}
+        >
+          <Crop size={18} className="text-gray-600 dark:text-darkText-secondary" />
+          <div className="flex-1">
+            <div className="text-sm font-medium text-gray-900 dark:text-darkText-primary">Capture region</div>
+          </div>
+        </button>
+
         <button
           className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left hover:bg-gray-50 dark:hover:bg-darkBg-tertiary transition"
         >
@@ -70,16 +83,16 @@ export const QuickActionsPopover: React.FC<QuickActionsPopoverProps> = ({
           </div>
         </button>
         
-        <button
+        {/* <button
           className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left hover:bg-gray-50 dark:hover:bg-darkBg-tertiary transition"
         >
           <Image size={18} className="text-gray-600 dark:text-darkText-secondary" />
           <div className="flex-1">
             <div className="text-sm font-medium text-gray-900 dark:text-darkText-primary">Create image</div>
           </div>
-        </button>
+        </button> */}
         
-        <button
+        {/* <button
           className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left hover:bg-gray-50 dark:hover:bg-darkBg-tertiary transition relative group"
         >
           <div className="w-6 h-6 flex items-center justify-center">
@@ -91,18 +104,18 @@ export const QuickActionsPopover: React.FC<QuickActionsPopoverProps> = ({
           <div className="bg-blue-600 text-white text-xs font-medium px-2 py-0.5 rounded">
             NEW
           </div>
-        </button>
+        </button> */}
         
-        <button
+        {/* <button
           className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left hover:bg-gray-50 dark:hover:bg-darkBg-tertiary transition"
         >
           <BookOpen size={18} className="text-gray-600 dark:text-darkText-secondary" />
           <div className="flex-1">
             <div className="text-sm font-medium text-gray-900 dark:text-darkText-primary">Study and learn</div>
           </div>
-        </button>
+        </button> */}
         
-        <button
+        {/* <button
           className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left hover:bg-gray-50 dark:hover:bg-darkBg-tertiary transition"
         >
           <MoreHorizontal size={18} className="text-gray-600 dark:text-darkText-secondary" />
@@ -110,7 +123,7 @@ export const QuickActionsPopover: React.FC<QuickActionsPopoverProps> = ({
             <div className="text-sm font-medium text-gray-900 dark:text-darkText-primary">More</div>
           </div>
           <ChevronRight size={16} className="text-gray-400 dark:text-darkText-tertiary" />
-        </button>
+        </button> */}
       </div>
     </Popover>
   );

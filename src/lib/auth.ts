@@ -63,9 +63,183 @@ class MieltoAuth {
 
 
 
+  /**
+   * Sign in with Google OAuth
+   */
+  async signInWithGoogle(): Promise<LoginTokenResponse> {
+    console.log('🔐 AUTH - Starting Google OAuth login process...');
+
+    try {
+      // Get the Chrome extension redirect URL
+      const redirectURL = chrome.identity.getRedirectURL('oauth2');
+      console.log('🔐 AUTH - Extension redirect URL:', redirectURL);
+
+      // Step 1: Get Supabase OAuth URL
+      console.log('🔐 AUTH - Step 1: Getting Google OAuth URL from Supabase...');
+      const { data: supabaseAuth, error: supabaseError } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: redirectURL,
+          skipBrowserRedirect: true,
+        },
+      });
+
+      if (supabaseError) {
+        console.error('🔐 AUTH - Supabase OAuth error:', supabaseError);
+        throw new Error(supabaseError.message || 'Google authentication failed');
+      }
+
+      const authUrl = supabaseAuth.url;
+      if (!authUrl) {
+        throw new Error('No OAuth URL received from Supabase');
+      }
+
+      console.log('🔐 AUTH - OAuth URL received, launching web auth flow...');
+
+      // Step 2: Launch OAuth flow using Chrome Identity API
+      const redirectUrl = await chrome.identity.launchWebAuthFlow({
+        url: authUrl,
+        interactive: true,
+      });
+
+      if (!redirectUrl) {
+        throw new Error('OAuth flow was cancelled or failed');
+      }
+
+      console.log('🔐 AUTH - OAuth redirect received');
+
+      // Step 3: Extract tokens from redirect URL
+      // Tokens can be in hash (#) or query (?) parameters depending on Supabase config
+      const url = new URL(redirectUrl);
+
+      // Try hash params first (default for implicit flow)
+      let supabaseToken = null;
+      let refreshToken = null;
+
+      if (url.hash) {
+        const hashParams = new URLSearchParams(url.hash.substring(1));
+        supabaseToken = hashParams.get('access_token');
+        refreshToken = hashParams.get('refresh_token');
+      }
+
+      // Fallback to query params (PKCE flow)
+      if (!supabaseToken && url.searchParams.has('code')) {
+        const authCode = url.searchParams.get('code');
+        console.log('🔐 AUTH - Exchanging auth code for tokens...');
+
+        // Exchange code for tokens using Supabase
+        const { data: tokenData, error: tokenError } = await supabase.auth.exchangeCodeForSession(authCode!);
+
+        if (tokenError || !tokenData.session) {
+          console.error('🔐 AUTH - Token exchange error:', tokenError);
+          throw new Error(tokenError?.message || 'Failed to exchange code for session');
+        }
+
+        supabaseToken = tokenData.session.access_token;
+        refreshToken = tokenData.session.refresh_token;
+      }
+
+      if (!supabaseToken) {
+        console.error('🔐 AUTH - No tokens found in redirect URL:', redirectUrl);
+        throw new Error('No access token received from Google OAuth');
+      }
+
+      console.log('🔐 AUTH - Google OAuth successful, got token');
+
+      // Step 4: Complete Mielto session
+      return await this.completeMieltoSession(supabaseToken, refreshToken || '');
+    } catch (error: any) {
+      console.error('🔐 AUTH - Google login error:', error);
+
+      // Sign out from Supabase if something went wrong
+      try {
+        await supabase.auth.signOut();
+      } catch (signOutError) {
+        console.error('🔐 AUTH - Failed to sign out from Supabase:', signOutError);
+      }
+
+      throw new Error(error.message || 'Google authentication failed');
+    }
+  }
+
+  /**
+   * Complete Mielto session after Supabase authentication
+   * Shared logic between email/password and OAuth sign-in
+   */
+  private async completeMieltoSession(supabaseToken: string, refreshToken: string): Promise<LoginTokenResponse> {
+    // Step 2: Get session data from Mielto backend using Supabase token
+    console.log('🔐 AUTH - Getting session from Mielto backend...');
+    const response = await fetch(`${this.baseUrl}/api/v1/auth/session`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer supabase_${supabaseToken}`,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    console.log('🔐 AUTH - Session endpoint response status:', response.status);
+
+    if (!response.ok) {
+      let errorData;
+      try {
+        errorData = await response.json();
+        console.error('🔐 AUTH - Session endpoint error:', errorData);
+      } catch (e) {
+        console.error('🔐 AUTH - Failed to parse session error response');
+        errorData = { message: `HTTP ${response.status}: ${response.statusText}` };
+      }
+      throw new Error(errorData.message || errorData.detail || `Session validation failed (${response.status})`);
+    }
+
+    const sessionData = await response.json();
+    console.log('🔐 AUTH - Session data keys:', Object.keys(sessionData));
+
+    // Save Supabase token to storage
+    await this.saveTokensToStorage(supabaseToken, refreshToken);
+    console.log('🔐 AUTH - Supabase token saved');
+
+    // Save user and workspace data
+    if (sessionData.user) {
+      await this.saveCurrentSession({
+        id: sessionData.user.id,
+        email: sessionData.user.email,
+        first_name: sessionData.user.first_name || '',
+        last_name: sessionData.user.last_name || '',
+        avatar_url: sessionData.user.avatar_url || '',
+        status: 'active',
+        workspaces: sessionData.workspace ? [sessionData.workspace] : [],
+      });
+      console.log('🔐 AUTH - User session saved');
+    }
+
+    if (sessionData.workspace) {
+      await this.setCurrentSessionWorkspace(sessionData.workspace);
+      console.log('🔐 AUTH - Workspace saved');
+    }
+
+    // Return response in expected format
+    const loginResponse: LoginTokenResponse = {
+      access_token: supabaseToken,
+      refresh_token: refreshToken,
+      token_type: 'Bearer',
+      user: {
+        id: sessionData.user.id,
+        email: sessionData.user.email,
+        first_name: sessionData.user.first_name || '',
+        last_name: sessionData.user.last_name || '',
+        avatar_url: sessionData.user.avatar_url || '',
+        status: 'active',
+        workspaces: sessionData.workspace ? [sessionData.workspace] : [],
+      },
+    };
+
+    console.log('🔐 AUTH - Login successful');
+    return loginResponse;
+  }
+
   async signIn(email: string, password: string): Promise<LoginTokenResponse> {
     console.log('🔐 AUTH - Starting login process for:', email);
-    
+
     try {
       // Step 1: Sign into Supabase
       console.log('🔐 AUTH - Step 1: Authenticating with Supabase...');
@@ -76,16 +250,16 @@ class MieltoAuth {
 
       if (supabaseError) {
         console.error('🔐 AUTH - Supabase auth error:', supabaseError);
-        
+
         // Provide specific error messages for common issues
         if (supabaseError.message?.includes('Invalid API key')) {
           throw new Error('Invalid Supabase API key. Please check your VITE_SUPABASE_ANON_KEY in .env file.');
         }
-        
+
         if (supabaseError.message?.includes('Invalid login credentials')) {
           throw new Error('Invalid email or password. Please check your credentials.');
         }
-        
+
         throw new Error(supabaseError.message || 'Supabase authentication failed');
       }
 
@@ -96,75 +270,10 @@ class MieltoAuth {
 
       console.log('🔐 AUTH - Supabase auth successful, got token');
       const supabaseToken = supabaseAuth.session.access_token;
+      const refreshToken = supabaseAuth.session.refresh_token || '';
 
-      // Step 2: Get session data from Mielto backend using Supabase token
-      console.log('🔐 AUTH - Step 2: Getting session from Mielto backend...');
-      const response = await fetch(`${this.baseUrl}/api/v1/auth/session`, {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer supabase_${supabaseToken}`,
-          'Content-Type': 'application/json',
-        },
-      });
-
-      console.log('🔐 AUTH - Session endpoint response status:', response.status);
-
-      if (!response.ok) {
-        let errorData;
-        try {
-          errorData = await response.json();
-          console.error('🔐 AUTH - Session endpoint error:', errorData);
-        } catch (e) {
-          console.error('🔐 AUTH - Failed to parse session error response');
-          errorData = { message: `HTTP ${response.status}: ${response.statusText}` };
-        }
-        throw new Error(errorData.message || errorData.detail || `Session validation failed (${response.status})`);
-      }
-
-      const sessionData = await response.json();
-      console.log('🔐 AUTH - Session data keys:', Object.keys(sessionData));
-
-      // Save Supabase token to storage  
-      await this.saveTokensToStorage(supabaseToken, supabaseAuth.session.refresh_token || '');
-      console.log('🔐 AUTH - Supabase token saved');
-
-      // Save user and workspace data
-      if (sessionData.user) {
-        await this.saveCurrentSession({
-          id: sessionData.user.id,
-          email: sessionData.user.email,
-          first_name: sessionData.user.first_name || '',
-          last_name: sessionData.user.last_name || '',
-          avatar_url: sessionData.user.avatar_url || '',
-          status: 'active',
-          workspaces: sessionData.workspace ? [sessionData.workspace] : [],
-        });
-        console.log('🔐 AUTH - User session saved');
-      }
-
-      if (sessionData.workspace) {
-        await this.setCurrentSessionWorkspace(sessionData.workspace);
-        console.log('🔐 AUTH - Workspace saved');
-      }
-
-      // Return response in expected format
-      const loginResponse: LoginTokenResponse = {
-        access_token: supabaseToken,
-        refresh_token: supabaseAuth.session.refresh_token || '',
-        token_type: 'Bearer',
-        user: {
-          id: sessionData.user.id,
-          email: sessionData.user.email,
-          first_name: sessionData.user.first_name || '',
-          last_name: sessionData.user.last_name || '',
-          avatar_url: sessionData.user.avatar_url || '',
-          status: 'active',
-          workspaces: sessionData.workspace ? [sessionData.workspace] : [],
-        },
-      };
-
-      console.log('🔐 AUTH - Login successful');
-      return loginResponse;
+      // Step 2: Complete Mielto session
+      return await this.completeMieltoSession(supabaseToken, refreshToken);
     } catch (error: any) {
       console.error('🔐 AUTH - Login error:', error);
       

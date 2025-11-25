@@ -18,7 +18,13 @@ export interface MieltoContext {
 
 export interface MieltoMessage {
   role: 'user' | 'assistant' | 'system';
-  content: string;
+  content: string | Array<{
+    type: 'text' | 'image';
+    text?: string;
+    image?: string;
+  }>;
+  tool_calls?: any[];
+  tool_call_id?: string;
 }
 
 export interface ChatCompletionRequest {
@@ -782,15 +788,12 @@ This content should be indexed and made searchable for future queries. Please ac
       })),
       {
         role: 'user' as const,
-        content: screenshot 
+        content: screenshot
           ? [
               ...(question ? [{ type: 'text' as const, text: question }] : []),
-              { 
-                type: 'image_url' as const, 
-                image_url: { 
-                  url: screenshot,
-                  detail: 'auto' as const
-                } 
+              {
+                type: 'image' as const,
+                image: screenshot
               }
             ]
           : question,
@@ -804,12 +807,12 @@ This content should be indexed and made searchable for future queries. Please ac
         role: userMsg.role,
         contentType: Array.isArray(userMsg.content) ? 'array' : typeof userMsg.content,
         contentLength: Array.isArray(userMsg.content) ? userMsg.content.length : 'N/A',
-        contentPreview: Array.isArray(userMsg.content) 
+        contentPreview: Array.isArray(userMsg.content)
           ? userMsg.content.map((part: any) => ({
               type: part.type,
-              hasImageUrl: !!part.image_url,
-              imageUrlType: part.image_url ? typeof part.image_url.url : 'N/A',
-              imageUrlPreview: part.image_url?.url?.substring(0, 50) + '...'
+              hasImage: !!part.image,
+              imageType: part.image ? typeof part.image : 'N/A',
+              imagePreview: part.image?.substring(0, 50) + '...'
             }))
           : 'N/A'
       });

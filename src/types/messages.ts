@@ -74,6 +74,11 @@ export enum MessageType {
   // Feature 5: Attach Tab enhancements
   GET_OPEN_TABS = 'GET_OPEN_TABS',
   GET_TAB_CONTENT = 'GET_TAB_CONTENT',
+
+  // Feature 6: Screen Region Capture
+  SHOW_SCREEN_CAPTURE_OVERLAY = 'SHOW_SCREEN_CAPTURE_OVERLAY',
+  CAPTURE_SCREEN_REGION = 'CAPTURE_SCREEN_REGION',
+  CAPTURE_SCREEN_CANCELLED = 'CAPTURE_SCREEN_CANCELLED',
 }
 
 export interface Message<T = any> {

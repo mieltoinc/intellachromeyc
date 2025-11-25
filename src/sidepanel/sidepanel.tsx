@@ -24,6 +24,7 @@ import { getFirstActiveApiKey } from '@/handlers/apikey.handler';
 import { mieltoAuth } from '@/lib/auth';
 import { ThemeProvider } from '@/components/ThemeContext';
 import { ThemeToggle } from '@/components/ThemeToggle';
+import { getAgentSuggestions, type AgentSuggestion } from '@/utils/agent-suggestions';
 import '../styles/app.css';
 
 interface ToolExecution {
@@ -40,6 +41,13 @@ interface ChatMessage {
   timestamp: Date;
   usedMemories?: Memory[];
   toolExecutions?: ToolExecution[];
+}
+
+interface StagedImage {
+  id: string;
+  dataUrl: string;
+  type: 'screenshot' | 'region';
+  timestamp: Date;
 }
 
 const SidePanelInner: React.FC = () => {
@@ -64,6 +72,9 @@ const SidePanelInner: React.FC = () => {
     message?: string;
   }>({ isUploading: false });
   // const [isStreaming, setIsStreaming] = useState(false);
+
+  // Staged images for screenshots
+  const [stagedImages, setStagedImages] = useState<StagedImage[]>([]);
   
   // Voice chat state (browser speech-to-text)
   const [speechRecognition, setSpeechRecognition] = useState<any | null>(null);
@@ -87,12 +98,17 @@ const SidePanelInner: React.FC = () => {
     hasInfo: boolean;
     content?: string;
     tabId?: number;
+    url?: string;
   }>({ title: 'Current Page Context', hasInfo: false });
   const [faviconError, setFaviconError] = useState(false);
+
+  // Agent mode suggestions
+  const [agentSuggestions, setAgentSuggestions] = useState<AgentSuggestion[]>(getAgentSuggestions(''));
 
   const chatEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const tabSelectorButtonRef = useRef<HTMLButtonElement>(null);
+  const chatInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     console.log('📚 SidePanel: useEffect mounting - loading memories...');
@@ -107,11 +123,16 @@ const SidePanelInner: React.FC = () => {
     const port = chrome.runtime.connect({ name: 'sidepanel' });
     console.log('📱 SidePanel: Connected to background script');
 
-    // Listen for close messages
-    const messageListener = (message: any) => {
+    // Listen for close messages and region capture
+    const messageListener = async (message: any) => {
       if (message.type === 'CLOSE_SIDEPANEL') {
         console.log('📱 SidePanel: Received close message, closing...');
         window.close();
+      }
+
+      if (message.type === MessageType.CAPTURE_SCREEN_REGION) {
+        console.log('📸 SidePanel: Received region capture', message.payload);
+        await processRegionCapture(message.payload);
       }
     };
 
@@ -138,7 +159,21 @@ const SidePanelInner: React.FC = () => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatMessages]);
 
+  // Focus chat input when sidepanel opens
+  useEffect(() => {
+    // Small delay to ensure the input is fully rendered
+    const timer = setTimeout(() => {
+      chatInputRef.current?.focus();
+    }, 100);
+    return () => clearTimeout(timer);
+  }, []);
 
+  // Focus chat input when switching back to chat tab
+  useEffect(() => {
+    if (activeTab === 'chat') {
+      chatInputRef.current?.focus();
+    }
+  }, [activeTab]);
 
   // Streaming functionality for future use
   // const handleSendMessageStreaming = async () => {
@@ -412,14 +447,19 @@ const SidePanelInner: React.FC = () => {
           favicon: faviconUrl,
           hasInfo: true,
           content: pageContent,
-          tabId: tab.id
+          tabId: tab.id,
+          url: tab.url
         });
+
+        // Load agent suggestions based on current URL
+        setAgentSuggestions(getAgentSuggestions(tab.url));
       } else {
         console.log('⚠️ Could not get tab information, using fallback');
         setCurrentPageInfo({
           title: 'Current Page Context',
           hasInfo: false,
-          tabId: undefined
+          tabId: undefined,
+          url: undefined
         });
       }
     } catch (error) {
@@ -566,7 +606,6 @@ const SidePanelInner: React.FC = () => {
 
   const handleScreenshot = async () => {
     setShowUploadPopover(false);
-    setIsLoading(true);
 
     try {
       // Capture screenshot using Chrome API
@@ -580,41 +619,15 @@ const SidePanelInner: React.FC = () => {
         quality: 90
       });
 
-      // Add user message showing screenshot
-      const userMessage: ChatMessage = {
-        role: 'user',
-        content: `📸 Screenshot captured`,
+      // Stage the screenshot instead of immediately sending it
+      const stagedImage: StagedImage = {
+        id: `screenshot_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        dataUrl,
+        type: 'screenshot',
         timestamp: new Date(),
       };
-      setChatMessages(prev => [...prev, userMessage]);
 
-      // Send to LLM with screenshot
-      const context = currentPageInfo.hasInfo && currentPageInfo.content 
-        ? currentPageInfo.content 
-        : undefined;
-
-      // Use multimodal message format - provide a default prompt for screenshots
-      const response = await chrome.runtime.sendMessage({
-        type: MessageType.ASK_INTELLA,
-        payload: { 
-          question: 'What do you see in this screenshot? Describe and analyze the content.',
-          context,
-          screenshot: dataUrl,
-          model: selectedModel
-        },
-      });
-
-      if (response.success) {
-        const assistantMessage: ChatMessage = {
-          role: 'assistant',
-          content: response.data,
-          timestamp: new Date(),
-          toolExecutions: (response as any).toolExecutions,
-        };
-        setChatMessages(prev => [...prev, assistantMessage]);
-      } else {
-        throw new Error(response.error || 'Failed to process screenshot');
-      }
+      setStagedImages(prev => [...prev, stagedImage]);
     } catch (error) {
       console.error('Screenshot error:', error);
       const errorMessage: ChatMessage = {
@@ -623,9 +636,114 @@ const SidePanelInner: React.FC = () => {
         timestamp: new Date(),
       };
       setChatMessages(prev => [...prev, errorMessage]);
-    } finally {
-      setIsLoading(false);
     }
+  };
+
+  const handleScreenshotRegion = async () => {
+    setShowUploadPopover(false);
+
+    try {
+      // Get active tab
+      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (!tabs[0]?.id) {
+        throw new Error('No active tab found');
+      }
+
+      const tabId = tabs[0].id;
+
+      // Check if we can access the tab (not a chrome:// or extension page)
+      if (tabs[0].url?.startsWith('chrome://') || tabs[0].url?.startsWith('chrome-extension://')) {
+        throw new Error('Cannot capture screenshots on browser internal pages. Please navigate to a regular webpage.');
+      }
+
+      // Show screen capture overlay in the active tab
+      await chrome.tabs.sendMessage(tabId, {
+        type: MessageType.SHOW_SCREEN_CAPTURE_OVERLAY,
+      });
+
+      // The rest of the capture process will be handled by the processRegionCapture function
+      // when it receives the CAPTURE_SCREEN_REGION message
+    } catch (error) {
+      console.error('Error starting region capture:', error);
+      let errorMsg = error instanceof Error ? error.message : 'Unknown error';
+
+      if (errorMsg.includes('Receiving end does not exist')) {
+        errorMsg = 'The page needs to be refreshed before using screen capture. Please refresh this page and try again.';
+      }
+
+      const errorMessage: ChatMessage = {
+        role: 'assistant',
+        content: `❌ ${errorMsg}`,
+        timestamp: new Date(),
+      };
+      setChatMessages(prev => [...prev, errorMessage]);
+    }
+  };
+
+  const processRegionCapture = async (region: { x: number; y: number; width: number; height: number }) => {
+    try {
+      // Capture full screenshot using Chrome API
+      const dataUrl = await chrome.tabs.captureVisibleTab({
+        format: 'png',
+        quality: 90
+      });
+
+      // Crop the screenshot to the selected region
+      const croppedDataUrl = await cropImage(dataUrl, region);
+
+      // Stage the cropped screenshot instead of immediately sending it
+      const stagedImage: StagedImage = {
+        id: `region_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        dataUrl: croppedDataUrl,
+        type: 'region',
+        timestamp: new Date(),
+      };
+
+      setStagedImages(prev => [...prev, stagedImage]);
+    } catch (error) {
+      console.error('Region capture error:', error);
+      const errorMessage: ChatMessage = {
+        role: 'assistant',
+        content: `❌ Sorry, there was an error capturing the screenshot region: ${error instanceof Error ? error.message : 'Unknown error'}. Please try again.`,
+        timestamp: new Date(),
+      };
+      setChatMessages(prev => [...prev, errorMessage]);
+    }
+  };
+
+  const cropImage = (dataUrl: string, region: { x: number; y: number; width: number; height: number }): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+
+        if (!ctx) {
+          reject(new Error('Failed to get canvas context'));
+          return;
+        }
+
+        canvas.width = region.width;
+        canvas.height = region.height;
+
+        // Draw the cropped region
+        ctx.drawImage(
+          img,
+          region.x,
+          region.y,
+          region.width,
+          region.height,
+          0,
+          0,
+          region.width,
+          region.height
+        );
+
+        resolve(canvas.toDataURL('image/png'));
+      };
+      img.onerror = () => reject(new Error('Failed to load image'));
+      img.src = dataUrl;
+    });
   };
 
   const handleAttachCurrentPage = async () => {
@@ -1196,16 +1314,28 @@ const SidePanelInner: React.FC = () => {
   };
 
   const handleSendMessageWithTabs = async () => {
-    if (!query.trim() || isLoading) return;
+    // Allow sending if there's a query OR if there are staged images
+    if ((!query.trim() && stagedImages.length === 0) || isLoading) return;
+
+    // Build user message content with image indicators
+    let messageContent = query || '';
+    if (stagedImages.length > 0) {
+      const imageIndicator = stagedImages.length === 1
+        ? '📸 [Image attached]'
+        : `📸 [${stagedImages.length} images attached]`;
+      messageContent = messageContent
+        ? `${messageContent}\n\n${imageIndicator}`
+        : imageIndicator;
+    }
 
     const userMessage: ChatMessage = {
       role: 'user',
-      content: query,
+      content: messageContent,
       timestamp: new Date(),
     };
 
     setChatMessages(prev => [...prev, userMessage]);
-    const currentQuery = query;
+    const currentQuery = query || 'Analyze the attached image(s)';
     setQuery('');
     setIsLoading(true);
 
@@ -1260,15 +1390,32 @@ const SidePanelInner: React.FC = () => {
       }));
 
       console.log('🚀 Sending to AI with context length:', context.length);
+
+      // Prepare payload with staged images if any
+      const payload: any = {
+        question: currentQuery,
+        context,
+        model: selectedModel,
+        conversationHistory,
+        attachedTabIds: attachedTabs.map(t => t.id), // Include tab IDs for reference
+      };
+
+      // Add staged images to payload
+      if (stagedImages.length > 0) {
+        console.log('📸 Including', stagedImages.length, 'staged image(s) in message');
+        // For now, we'll send the first image as 'screenshot' for backward compatibility
+        // In the future, we can support multiple images
+        payload.screenshot = stagedImages[0].dataUrl;
+
+        // If there are multiple images, add them as an array
+        if (stagedImages.length > 1) {
+          payload.screenshots = stagedImages.map(img => img.dataUrl);
+        }
+      }
+
       const response = await chrome.runtime.sendMessage({
         type: MessageType.ASK_INTELLA,
-        payload: {
-          question: currentQuery,
-          context,
-          model: selectedModel,
-          conversationHistory,
-          attachedTabIds: attachedTabs.map(t => t.id), // Include tab IDs for reference
-        },
+        payload,
       });
 
       if (response.success) {
@@ -1280,9 +1427,10 @@ const SidePanelInner: React.FC = () => {
         };
         setChatMessages(prev => [...prev, assistantMessage]);
 
-        // Clear attached tabs after successful message
-        console.log('🧹 Clearing attached tabs after successful message');
+        // Clear attached tabs and staged images after successful message
+        console.log('🧹 Clearing attached tabs and staged images after successful message');
         setAttachedTabs([]);
+        setStagedImages([]);
       } else {
         throw new Error(response.error);
       }
@@ -1384,34 +1532,34 @@ const SidePanelInner: React.FC = () => {
                         </span>
                       </div>
                       <div className="text-xs text-gray-500 dark:text-darkText-tertiary">
-                        Ask Intella to perform complex tasks in the browser
+                        Context-aware AI prompts for {currentPageInfo.url ? (() => {
+                          try {
+                            return new URL(currentPageInfo.url).hostname.replace('www.', '');
+                          } catch {
+                            return 'this page';
+                          }
+                        })() : 'this page'}
                       </div>
                     </div>
-                    <button
-                      onClick={() => setQuery('Suggest endpoints')}
-                      className="w-full flex items-start gap-3 p-3 rounded-lg hover:bg-gray-50 dark:hover:bg-darkBg-tertiary transition text-left group"
-                    >
-                      <div className="w-8 h-8 rounded-full bg-gray-100 dark:bg-darkBg-secondary flex items-center justify-center flex-shrink-0">
-                        <span className="text-lg">💭</span>
-                      </div>
-                      <div>
-                        <div className="text-sm font-medium text-gray-900 dark:text-darkText-primary mb-0.5">Suggest endpoints</div>
-                        <div className="text-xs text-gray-500 dark:text-darkText-tertiary">Which endpoints are best to start with?</div>
-                      </div>
-                    </button>
-
-                    <button
-                      onClick={() => setQuery('Summarize usage')}
-                      className="w-full flex items-start gap-3 p-3 rounded-lg hover:bg-gray-50 dark:hover:bg-darkBg-tertiary transition text-left group"
-                    >
-                      <div className="w-8 h-8 rounded-full bg-gray-100 dark:bg-darkBg-secondary flex items-center justify-center flex-shrink-0">
-                        <span className="text-lg">💭</span>
-                      </div>
-                      <div>
-                        <div className="text-sm font-medium text-gray-900 dark:text-darkText-primary mb-0.5">Summarize usage</div>
-                        <div className="text-xs text-gray-500 dark:text-darkText-tertiary">Summarize the main ways this API is used.</div>
-                      </div>
-                    </button>
+                    {agentSuggestions.map((suggestion, index) => (
+                      <button
+                        key={index}
+                        onClick={() => {
+                          setQuery(suggestion.prompt);
+                          // Auto-execute the prompt
+                          setTimeout(() => handleSendMessageWithTabs(), 100);
+                        }}
+                        className="w-full flex items-start gap-3 p-3 rounded-lg hover:bg-gray-50 dark:hover:bg-darkBg-tertiary transition text-left group"
+                      >
+                        <div className="w-8 h-8 rounded-full bg-gray-100 dark:bg-darkBg-secondary flex items-center justify-center flex-shrink-0">
+                          <span className="text-lg">{suggestion.icon}</span>
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm font-medium text-gray-900 dark:text-darkText-primary mb-0.5">{suggestion.title}</div>
+                          <div className="text-xs text-gray-500 dark:text-darkText-tertiary">{suggestion.description}</div>
+                        </div>
+                      </button>
+                    ))}
                   </div>
 
 
@@ -1540,6 +1688,33 @@ const SidePanelInner: React.FC = () => {
 
             {/* Input */}
             <div className="border-t border-gray-200 dark:border-darkBg-secondary bg-white dark:bg-darkBg-primary p-2">
+              {/* Staged images thumbnails */}
+              {stagedImages.length > 0 && (
+                <div className="px-2 mb-2">
+                  <div className="flex items-center gap-2 overflow-x-auto py-1 [&::-webkit-scrollbar]:thin [&::-webkit-scrollbar-thumb]:bg-gray-300 dark:[&::-webkit-scrollbar-thumb]:bg-gray-600">
+                    {stagedImages.map((image) => (
+                      <div
+                        key={image.id}
+                        className="relative flex-shrink-0 group"
+                      >
+                        <img
+                          src={image.dataUrl}
+                          alt={`${image.type} thumbnail`}
+                          className="w-16 h-16 object-cover rounded-lg border-2 border-blue-500 dark:border-blue-400"
+                        />
+                        <button
+                          onClick={() => setStagedImages(prev => prev.filter(img => img.id !== image.id))}
+                          className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 hover:bg-red-600 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                          title="Remove image"
+                        >
+                          <X size={12} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* Context indicator and attached tabs */}
               <div className="px-2 mb-2">
                 {/* All tabs (current page + attached) in pill format with @ button inline */}
@@ -1688,6 +1863,7 @@ const SidePanelInner: React.FC = () => {
                     onClose={() => setShowUploadPopover(false)}
                     onFileUpload={() => fileInputRef.current?.click()}
                     onScreenshot={handleScreenshot}
+                    onScreenshotRegion={handleScreenshotRegion}
                     onAttachCurrentPage={handleAttachCurrentPage}
                     isUploading={uploadProgress.isUploading}
                   />
@@ -1704,6 +1880,7 @@ const SidePanelInner: React.FC = () => {
                 </div>
 
                 <MentionInput
+                  ref={chatInputRef}
                   value={query}
                   onChange={setQuery}
                   onKeyPress={(e) => e.key === 'Enter' && handleSendMessageWithTabs()}
@@ -1731,7 +1908,7 @@ const SidePanelInner: React.FC = () => {
                 
                 <button
                   onClick={handleSendMessageWithTabs}
-                  disabled={isLoading || !query.trim()}
+                  disabled={isLoading || (!query.trim() && stagedImages.length === 0)}
                   className="px-3 py-3 text-gray-600 dark:text-darkText-secondary hover:text-gray-900 dark:hover:text-darkText-primary transition disabled:opacity-50 disabled:cursor-not-allowed"
                   title="Send message"
                 >

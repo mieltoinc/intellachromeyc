@@ -11,13 +11,10 @@ import { toolRegistry } from './tool-registry';
 
 export interface AIMessage {
   role: 'user' | 'assistant' | 'system' | 'tool';
-  content: string | Array<{ 
-    type: 'text' | 'image_url'; 
-    text?: string; 
-    image_url?: { 
-      url: string; 
-      detail?: 'low' | 'high' | 'auto' 
-    } 
+  content: string | Array<{
+    type: 'text' | 'image';
+    text?: string;
+    image?: string;
   }>;
   tool_calls?: any[];
   tool_call_id?: string;

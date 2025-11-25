@@ -30,6 +30,8 @@ enum MessageType {
   CLOSE_SIDEPANEL = 'CLOSE_SIDEPANEL',
   GET_SIDEPANEL_STATE = 'GET_SIDEPANEL_STATE',
   CLEAR_ALL_USER_DATA = 'CLEAR_ALL_USER_DATA',
+  SHOW_SCREEN_CAPTURE_OVERLAY = 'SHOW_SCREEN_CAPTURE_OVERLAY',
+  CAPTURE_SCREEN_REGION = 'CAPTURE_SCREEN_REGION',
 }
 
 interface Message<T = any> {
@@ -1544,6 +1546,10 @@ class ContentScript {
         }
         return { success: true };
 
+      case MessageType.SHOW_SCREEN_CAPTURE_OVERLAY:
+        this.showScreenCaptureOverlay();
+        return { success: true };
+
       default:
         // Handle tool execution requests from background
         if ((message as any).type === 'EXECUTE_TOOL') {
@@ -2156,6 +2162,145 @@ class ContentScript {
       notification.style.opacity = '0 !important';
       setTimeout(() => notification.remove(), 300);
     }, 3000);
+  }
+
+  private showScreenCaptureOverlay() {
+    console.log('📸 Showing screen capture overlay');
+
+    // Remove existing overlay if any
+    const existing = document.getElementById('intella-screen-capture-overlay');
+    if (existing) {
+      existing.remove();
+    }
+
+    // Create overlay container
+    const overlay = document.createElement('div');
+    overlay.id = 'intella-screen-capture-overlay';
+    overlay.style.cssText = `
+      position: fixed !important;
+      top: 0 !important;
+      left: 0 !important;
+      width: 100% !important;
+      height: 100% !important;
+      z-index: 2147483647 !important;
+      cursor: crosshair !important;
+      background: rgba(0, 0, 0, 0.3) !important;
+    `;
+
+    // Create instructions
+    const instructions = document.createElement('div');
+    instructions.style.cssText = `
+      position: fixed !important;
+      top: 20px !important;
+      left: 50% !important;
+      transform: translateX(-50%) !important;
+      background: white !important;
+      padding: 12px 24px !important;
+      border-radius: 8px !important;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15) !important;
+      font-family: system-ui, -apple-system, sans-serif !important;
+      font-size: 14px !important;
+      font-weight: 500 !important;
+      color: #111827 !important;
+      z-index: 2147483648 !important;
+      pointer-events: none !important;
+    `;
+    instructions.textContent = 'Click and drag to select a region • Press ESC to cancel';
+    document.body.appendChild(instructions);
+
+    let isSelecting = false;
+    let startX = 0, startY = 0;
+    let selection: HTMLDivElement | null = null;
+
+    const handleMouseDown = (e: MouseEvent) => {
+      isSelecting = true;
+      startX = e.clientX;
+      startY = e.clientY;
+
+      // Create selection rectangle
+      selection = document.createElement('div');
+      selection.style.cssText = `
+        position: fixed !important;
+        border: 2px solid #3b82f6 !important;
+        background: rgba(59, 130, 246, 0.1) !important;
+        pointer-events: none !important;
+        z-index: 2147483648 !important;
+      `;
+      document.body.appendChild(selection);
+    };
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isSelecting || !selection) return;
+
+      const currentX = e.clientX;
+      const currentY = e.clientY;
+
+      const left = Math.min(startX, currentX);
+      const top = Math.min(startY, currentY);
+      const width = Math.abs(currentX - startX);
+      const height = Math.abs(currentY - startY);
+
+      selection.style.left = left + 'px';
+      selection.style.top = top + 'px';
+      selection.style.width = width + 'px';
+      selection.style.height = height + 'px';
+    };
+
+    const handleMouseUp = (e: MouseEvent) => {
+      if (!isSelecting) return;
+      isSelecting = false;
+
+      const currentX = e.clientX;
+      const currentY = e.clientY;
+
+      const left = Math.min(startX, currentX);
+      const top = Math.min(startY, currentY);
+      const width = Math.abs(currentX - startX);
+      const height = Math.abs(currentY - startY);
+
+      // Account for device pixel ratio
+      const dpr = window.devicePixelRatio || 1;
+
+      // Only capture if selection is meaningful (> 10px)
+      if (width > 10 && height > 10) {
+        // Send region to sidepanel
+        chrome.runtime.sendMessage({
+          type: MessageType.CAPTURE_SCREEN_REGION,
+          payload: {
+            x: left * dpr,
+            y: top * dpr,
+            width: width * dpr,
+            height: height * dpr,
+          },
+        });
+      }
+
+      // Clean up
+      cleanup();
+    };
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        cleanup();
+      }
+    };
+
+    const cleanup = () => {
+      overlay.remove();
+      instructions.remove();
+      if (selection) selection.remove();
+      document.removeEventListener('mousedown', handleMouseDown);
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+
+    overlay.addEventListener('mousedown', handleMouseDown);
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+    document.addEventListener('keydown', handleKeyDown);
+
+    document.body.appendChild(overlay);
   }
 }
 

@@ -54,15 +54,15 @@ chrome.runtime.onInstalled.addListener(async () => {
     console.warn('⚠️ Failed to initialize Moss on install:', error);
   }
 
-  // // Configure side panel to open on action click
-  // if (chrome.sidePanel) {
-  //   try {
-  //     await chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
-  //     console.log('Side panel configured to open on icon click');
-  //   } catch (error) {
-  //     console.log('Could not configure side panel behavior:', error);
-  //   }
-  // }
+  // Configure side panel to open on action click
+  if (chrome.sidePanel) {
+    try {
+      await chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
+      console.log('Side panel configured to open on icon click');
+    } catch (error) {
+      console.log('Could not configure side panel behavior:', error);
+    }
+  }
 
   // Create context menu items
   chrome.contextMenus.create({

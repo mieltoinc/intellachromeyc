@@ -21,7 +21,7 @@ interface MentionInputProps {
   className?: string;
 }
 
-export const MentionInput: React.FC<MentionInputProps> = ({
+export const MentionInput = React.forwardRef<HTMLInputElement, MentionInputProps>(({
   value,
   onChange,
   onKeyPress,
@@ -29,13 +29,13 @@ export const MentionInput: React.FC<MentionInputProps> = ({
   placeholder,
   disabled,
   className,
-}) => {
+}, ref) => {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [suggestions, setSuggestions] = useState<TabInfo[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [mentionMatch, setMentionMatch] = useState<MentionMatch | null>(null);
   const [allTabs, setAllTabs] = useState<TabInfo[]>([]);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = ref as React.RefObject<HTMLInputElement> || useRef<HTMLInputElement>(null);
 
   // Load all tabs when component mounts
   useEffect(() => {
@@ -211,4 +211,6 @@ export const MentionInput: React.FC<MentionInputProps> = ({
       )}
     </div>
   );
-};
+});
+
+MentionInput.displayName = 'MentionInput';

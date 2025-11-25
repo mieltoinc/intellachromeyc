@@ -9,7 +9,8 @@
     "scripting",
     "tabs",
     "contextMenus",
-    "sidePanel"
+    "sidePanel",
+    "identity"
   ],
   "optional_permissions": [
     "desktopCapture"
@@ -34,8 +35,7 @@
     }
   ],
   "action": {
-    "default_title": "Open Intella Sidepanel",
-    "default_popup": "src/popup/index.html"
+    "default_title": "Open Intella Sidepanel"
   },
   "side_panel": {
     "default_path": "src/sidepanel/index.html"
