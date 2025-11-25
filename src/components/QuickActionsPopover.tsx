@@ -1,5 +1,5 @@
 import React from 'react';
-import { Paperclip, Zap, Camera, Compass, Crop } from 'lucide-react';
+import { Paperclip, Zap, Camera, Crop } from 'lucide-react';
 import { Popover } from './Popover';
 
 interface QuickActionsPopoverProps {
@@ -74,14 +74,14 @@ export const QuickActionsPopover: React.FC<QuickActionsPopoverProps> = ({
           </div>
         </button>
 
-        <button
+        {/* <button
           className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left hover:bg-gray-50 dark:hover:bg-darkBg-tertiary transition"
         >
           <Compass size={18} className="text-gray-600 dark:text-darkText-secondary" />
           <div className="flex-1">
             <div className="text-sm font-medium text-gray-900 dark:text-darkText-primary">Deep research</div>
           </div>
-        </button>
+        </button> */}
         
         {/* <button
           className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left hover:bg-gray-50 dark:hover:bg-darkBg-tertiary transition"
