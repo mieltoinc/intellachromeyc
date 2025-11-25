@@ -31,7 +31,7 @@ export const AVAILABLE_MODELS: ModelOption[] = [
   { provider: 'anthropic', id: 'claude-3-haiku-20240307', name: 'Claude 3 Haiku' },
   
   // Gemini Models
-  { provider: 'gemini', id: 'gemini-3-pro-preview', name: 'Gemini 3 Pro' },
+  // { provider: 'gemini', id: 'gemini-3-pro-preview', name: 'Gemini 3 Pro' },
   { provider: 'gemini', id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro' },
   { provider: 'gemini', id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash' },
   { provider: 'gemini', id: 'gemini-2.5-flash-lite', name: 'Gemini 2.5 Flash Lite' },
