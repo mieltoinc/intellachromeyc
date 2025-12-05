@@ -145,12 +145,20 @@ const SidePanelInner: React.FC = () => {
       }
     };
 
+    // Listen for active tab changes
+    const tabActivatedListener = (activeInfo: chrome.tabs.TabActiveInfo) => {
+      console.log('🔄 Active tab changed to:', activeInfo.tabId);
+      loadCurrentPageInfo();
+    };
+
     chrome.tabs.onUpdated.addListener(tabUpdateListener);
+    chrome.tabs.onActivated.addListener(tabActivatedListener);
 
     // Cleanup on unmount
     return () => {
       chrome.runtime.onMessage.removeListener(messageListener);
       chrome.tabs.onUpdated.removeListener(tabUpdateListener);
+      chrome.tabs.onActivated.removeListener(tabActivatedListener);
       port.disconnect();
     };
   }, []);
@@ -349,8 +357,8 @@ const SidePanelInner: React.FC = () => {
             // Use AI SDK for floating queries
             console.log('🤖 Using AI SDK for floating query...');
             
-            // Include current page context if available
-            const context = currentPageInfo.hasInfo && currentPageInfo.content 
+            // Include current page context only if we have actual content and current tab is not manually attached
+            const context = currentPageInfo.hasInfo && currentPageInfo.content && currentPageInfo.title && !isCurrentTabAttached()
               ? currentPageInfo.content 
               : undefined;
             
@@ -474,11 +482,18 @@ const SidePanelInner: React.FC = () => {
 
   const clearCurrentPageInfo = () => {
     setCurrentPageInfo({
-      title: 'Current Page Context',
+      title: '',
       hasInfo: false,
       content: undefined,
-      tabId: undefined
+      tabId: undefined,
+      url: undefined
     });
+  };
+
+  // Check if current tab is already manually attached
+  const isCurrentTabAttached = () => {
+    return currentPageInfo.tabId !== undefined && 
+           attachedTabs.some(tab => tab.id === currentPageInfo.tabId);
   };
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -1150,7 +1165,7 @@ const SidePanelInner: React.FC = () => {
 
           // Send to AI
           try {
-            const context = currentPageInfo.hasInfo && currentPageInfo.content 
+            const context = currentPageInfo.hasInfo && currentPageInfo.content && currentPageInfo.title && !isCurrentTabAttached()
               ? currentPageInfo.content 
               : undefined;
             
@@ -1342,8 +1357,8 @@ const SidePanelInner: React.FC = () => {
     try {
       console.log('🤖 Sending message with', attachedTabs.length, 'attached tabs...');
 
-      // Include current page context if available
-      let context = currentPageInfo.hasInfo && currentPageInfo.content
+      // Include current page context only if we have actual content and current tab is not already manually attached
+      let context = currentPageInfo.hasInfo && currentPageInfo.content && currentPageInfo.title && !isCurrentTabAttached()
         ? currentPageInfo.content
         : '';
 
@@ -1736,29 +1751,29 @@ const SidePanelInner: React.FC = () => {
                     buttonRef={tabSelectorButtonRef}
                   />
 
-                  {/* Current page context as pill */}
-                  <div
-                    className="flex items-center gap-1.5 px-2 py-1 bg-green-100 dark:bg-green-900/50 text-green-800 dark:text-green-200 rounded-lg text-xs whitespace-nowrap flex-shrink-0"
-                    title={`Current page: ${currentPageInfo.title}${currentPageInfo.hasInfo ? `\n${currentPageInfo.content?.substring(0, 100) || 'Page content available'}` : '\nNo page context available'}`}
-                  >
-                    <div className="w-3 h-3 flex-shrink-0">
-                      {currentPageInfo.hasInfo && currentPageInfo.favicon && !faviconError ? (
-                        <img
-                          src={currentPageInfo.favicon}
-                          alt=""
-                          className="w-3 h-3"
-                          onError={() => {
-                            setFaviconError(true);
-                          }}
-                        />
-                      ) : (
-                        <Zap size={10} className="text-green-600 dark:text-green-300" />
-                      )}
-                    </div>
-                    <span className="font-medium">
-                      {currentPageInfo.title.length > 20 ? currentPageInfo.title.substring(0, 20) + '...' : currentPageInfo.title}
-                    </span>
-                    {currentPageInfo.hasInfo && (
+                  {/* Current page context as pill - only show if there's a title and current tab is not manually attached */}
+                  {currentPageInfo.title && !isCurrentTabAttached() && (
+                    <div
+                      className="flex items-center gap-1.5 px-2 py-1 bg-green-100 dark:bg-green-900/50 text-green-800 dark:text-green-200 rounded-lg text-xs whitespace-nowrap flex-shrink-0"
+                      title={`Current page: ${currentPageInfo.title}${currentPageInfo.hasInfo ? `\n${currentPageInfo.content?.substring(0, 100) || 'Page content available'}` : '\nNo page context available'}`}
+                    >
+                      <div className="w-3 h-3 flex-shrink-0">
+                        {currentPageInfo.hasInfo && currentPageInfo.favicon && !faviconError ? (
+                          <img
+                            src={currentPageInfo.favicon}
+                            alt=""
+                            className="w-3 h-3"
+                            onError={() => {
+                              setFaviconError(true);
+                            }}
+                          />
+                        ) : (
+                          <Zap size={10} className="text-green-600 dark:text-green-300" />
+                        )}
+                      </div>
+                      <span className="font-medium">
+                        {currentPageInfo.title.length > 20 ? currentPageInfo.title.substring(0, 20) + '...' : currentPageInfo.title}
+                      </span>
                       <button
                         onClick={clearCurrentPageInfo}
                         className="p-0.5 hover:bg-green-200 dark:hover:bg-green-800 rounded transition"
@@ -1766,8 +1781,8 @@ const SidePanelInner: React.FC = () => {
                       >
                         <X size={10} />
                       </button>
-                    )}
-                  </div>
+                    </div>
+                  )}
                   
                   {/* Attached tabs */}
                   {attachedTabs.map((tab) => (
