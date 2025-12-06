@@ -4,6 +4,7 @@
  */
 
 import { supabase } from './supabase';
+import { storage } from '@/utils/storage';
 
 export interface LoginRequest {
   email: string;
@@ -38,6 +39,92 @@ class MieltoAuth {
   private async loadTokensFromStorage() {
     const result = await chrome.storage.sync.get(['mielto_token', 'mielto_refresh_token']);
     this.token = result.mielto_token || null;
+  }
+
+  /**
+   * Refresh the access token using the refresh token
+   * This keeps users logged in for extended periods
+   * Can be called proactively or when token expires
+   */
+  async refreshToken(): Promise<boolean> {
+    try {
+      const result = await chrome.storage.sync.get(['mielto_refresh_token']);
+      const refreshToken = result.mielto_refresh_token;
+
+      if (!refreshToken) {
+        console.log('🔑 AUTH - No refresh token available');
+        return false;
+      }
+
+      console.log('🔄 AUTH - Refreshing access token...');
+      
+      // First, set the session with the refresh token so Supabase knows about it
+      const { error: setSessionError } = await supabase.auth.setSession({
+        access_token: this.token || '',
+        refresh_token: refreshToken,
+      });
+
+      if (setSessionError) {
+        console.error('🔑 AUTH - Failed to set session for refresh:', setSessionError);
+        await this.clearTokensFromStorage();
+        return false;
+      }
+
+      // Now refresh the session
+      const { data, error } = await supabase.auth.refreshSession();
+
+      if (error || !data.session) {
+        console.error('🔑 AUTH - Token refresh failed:', error);
+        // If refresh fails, clear tokens (user needs to login again)
+        await this.clearTokensFromStorage();
+        return false;
+      }
+
+      const newAccessToken = data.session.access_token;
+      const newRefreshToken = data.session.refresh_token || refreshToken;
+
+      // Save the new tokens
+      await this.saveTokensToStorage(newAccessToken, newRefreshToken);
+      console.log('✅ AUTH - Token refreshed successfully');
+
+      return true;
+    } catch (error) {
+      console.error('🔑 AUTH - Error refreshing token:', error);
+      await this.clearTokensFromStorage();
+      return false;
+    }
+  }
+
+  /**
+   * Private helper to refresh token and return the new token
+   * Used internally by getCurrentSession
+   */
+  private async refreshTokenInternal(): Promise<string | null> {
+    const result = await chrome.storage.sync.get(['mielto_refresh_token']);
+    const refreshToken = result.mielto_refresh_token;
+
+    if (!refreshToken) {
+      return null;
+    }
+
+    // First set the session, then refresh it
+    await supabase.auth.setSession({
+      access_token: this.token || '',
+      refresh_token: refreshToken,
+    });
+
+    const { data, error } = await supabase.auth.refreshSession();
+
+    if (error || !data.session) {
+      await this.clearTokensFromStorage();
+      return null;
+    }
+
+    const newAccessToken = data.session.access_token;
+    const newRefreshToken = data.session.refresh_token || refreshToken;
+    await this.saveTokensToStorage(newAccessToken, newRefreshToken);
+
+    return newAccessToken;
   }
 
   private async saveTokensToStorage(token: string, refreshToken: string) {
@@ -302,8 +389,14 @@ class MieltoAuth {
     let authHeader = '';
 
     // Check if we have an API key in settings first
-    const settings = await chrome.storage.sync.get(['mielto_settings']);
-    const apiKey = settings.mielto_settings?.apiKey;
+    const settings = await storage.getSettings();
+    const apiKey = settings.apiKey;
+
+    console.log('🔑 AUTH - API key:', apiKey);
+    console.log('🔑 AUTH - Token:', token);
+    console.log('🔑 AUTH - Access Token:', accessToken);
+    console.log('🔑 AUTH - This Token:', this.token);
+    console.log('🔑 AUTH - Settings:', settings);
 
     if (apiKey) {
       console.log('🔑 AUTH - Using API key for authentication');
@@ -343,7 +436,17 @@ class MieltoAuth {
       if (!response.ok) {
         if (response.status === 401 && count > 0 && !apiKey) {
           // Token might be expired, try to refresh (only for token auth)
-          return this.getCurrentSession(count - 1);
+          console.log('🔄 AUTH - Token expired, attempting refresh...');
+          const newToken = await this.refreshTokenInternal();
+          
+          if (newToken) {
+            // Retry with the new token
+            return this.getCurrentSession(count - 1, newToken);
+          } else {
+            // Refresh failed, user needs to login again
+            console.error('🔑 AUTH - Token refresh failed, user needs to login again');
+            return null;
+          }
         }
         throw new Error(`HTTP ${response.status}`);
       }
@@ -412,8 +515,8 @@ class MieltoAuth {
 
   async isAuthenticated(): Promise<boolean> {
     // Check for API key first
-    const settings = await chrome.storage.sync.get(['mielto_settings']);
-    const apiKey = settings.mielto_settings?.apiKey;
+    const settings = await storage.getSettings();
+    const apiKey = settings.apiKey;
     
     if (apiKey) {
       console.log('🔑 AUTH - API key found, checking session...');
@@ -442,8 +545,8 @@ class MieltoAuth {
 
   async getAuthHeader(): Promise<string | null> {
     // Check for API key first
-    const settings = await chrome.storage.sync.get(['mielto_settings']);
-    const apiKey = settings.mielto_settings?.apiKey;
+    const settings = await storage.getSettings();
+    const apiKey = settings.apiKey;
     
     if (apiKey) {
       return `Bearer ${apiKey}`;
@@ -462,8 +565,8 @@ class MieltoAuth {
   }
 
   async getAuthMethod(): Promise<'API_KEY' | 'TOKEN' | 'NONE'> {
-    const settings = await chrome.storage.sync.get(['mielto_settings']);
-    const apiKey = settings.mielto_settings?.apiKey;
+    const settings = await storage.getSettings();
+    const apiKey = settings.apiKey;
     
     if (apiKey) {
       return 'API_KEY';

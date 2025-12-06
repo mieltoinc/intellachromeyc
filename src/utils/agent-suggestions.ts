@@ -245,6 +245,8 @@ const defaultSuggestions: AgentSuggestion[] = [
  */
 export function getAgentSuggestions(url: string): AgentSuggestion[] {
   try {
+
+    console.log('🔍 AGENT SUGGESTIONS - URL:', url);
     const urlObj = new URL(url);
     const domain = urlObj.hostname;
 
