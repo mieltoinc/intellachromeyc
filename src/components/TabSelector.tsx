@@ -120,14 +120,15 @@ export const TabSelector: React.FC<TabSelectorProps> = ({
             tab.url.startsWith('moz-extension://') ||
             tab.url.startsWith('about:');
           
-          // Only exclude current tab if currentTabId is provided
-          const shouldExclude = isExtensionPage || (currentTabId && isCurrentTab);
+          // Always exclude extension pages, exclude current tab if currentTabId is provided
+          const shouldExclude = isExtensionPage || (currentTabId !== undefined && isCurrentTab);
           
           console.log('📑 Tab filter:', { 
             id: tab.id, 
             title: tab.title, 
             isCurrentTab, 
             isExtensionPage, 
+            currentTabId,
             shouldExclude 
           });
           
