@@ -5,7 +5,7 @@
 
 import React, { useState, useEffect, useRef, useReducer } from 'react';
 import ReactDOM from 'react-dom/client';
-import { Send, Search, BookOpen, Sparkles, Settings as SettingsIcon, RefreshCw, Plus, CheckCircle, AlertCircle, Loader2, Menu, Eye, EyeOff, Zap, Mic, MicOff, X, AtSign, PhoneOff } from 'lucide-react';
+import { Search, BookOpen, Sparkles, Settings as SettingsIcon, RefreshCw, Plus, CheckCircle, AlertCircle, Loader2, Eye, EyeOff, Zap, Mic, MicOff, X, AtSign, PhoneOff, ChevronDown, ChevronUp, Edit3 } from 'lucide-react';
 import { MessageType, TabInfo } from '@/types/messages';
 import { Memory, UserSettings } from '@/types/memory';
 import { mieltoAPI } from '@/utils/api';
@@ -24,7 +24,7 @@ import { getFirstActiveApiKey } from '@/handlers/apikey.handler';
 import { mieltoAuth } from '@/lib/auth';
 import { ThemeProvider } from '@/components/ThemeContext';
 import { ThemeToggle } from '@/components/ThemeToggle';
-import { getAgentSuggestions, type AgentSuggestion } from '@/utils/agent-suggestions';
+import { getAgentSuggestions, getBasicSuggestions, type AgentSuggestion, type SuggestionMode } from '@/utils/agent-suggestions';
 import '../styles/app.css';
 
 interface ToolExecution {
@@ -103,12 +103,15 @@ const SidePanelInner: React.FC = () => {
   const [faviconError, setFaviconError] = useState(false);
 
   // Agent mode suggestions
-  const [agentSuggestions, setAgentSuggestions] = useState<AgentSuggestion[]>(getAgentSuggestions(''));
+  const [agentSuggestions, setAgentSuggestions] = useState<AgentSuggestion[]>(getBasicSuggestions(''));
+  const [suggestionMode, setSuggestionMode] = useState<SuggestionMode>('basic');
+  const [suggestionsMinimized, setSuggestionsMinimized] = useState(false);
+  const [expandedToolExecutions, setExpandedToolExecutions] = useState<Set<string>>(new Set());
 
   const chatEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const tabSelectorButtonRef = useRef<HTMLButtonElement>(null);
-  const chatInputRef = useRef<HTMLInputElement>(null);
+  const chatInputRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     console.log('📚 SidePanel: useEffect mounting - loading memories...');
@@ -432,22 +435,54 @@ const SidePanelInner: React.FC = () => {
         // Try to get page content
         let pageContent = '';
         try {
+          console.log('🔍 Requesting page content from content script...');
           const contentResponse = await chrome.runtime.sendMessage({
             type: MessageType.GET_PAGE_CONTENT,
           });
           
+          console.log('📡 Content response:', {
+            success: contentResponse?.success,
+            hasData: !!contentResponse?.data,
+            dataKeys: contentResponse?.data ? Object.keys(contentResponse.data) : [],
+            error: contentResponse?.error
+          });
+          
           if (contentResponse.success && contentResponse.data) {
             // Format the page content for context
-            const { content, title: pageTitle, description } = contentResponse.data;
+            const { content, title: pageTitle, description, headings, links } = contentResponse.data;
+            
+            console.log('📄 Extracted content details:', {
+              pageTitle,
+              description,
+              contentLength: content?.length || 0,
+              contentPreview: content?.substring(0, 100),
+              headingsCount: headings?.length || 0,
+              linksCount: links?.length || 0
+            });
+            
             pageContent = `Page Title: ${pageTitle}\n`;
             if (description) {
               pageContent += `Description: ${description}\n`;
             }
             pageContent += `\nPage Content:\n${content}`;
-            console.log('✅ Loaded page content:', pageContent.substring(0, 200) + '...');
+            console.log('✅ Loaded page content:', {
+              totalLength: pageContent.length,
+              preview: pageContent.substring(0, 200) + '...',
+              hasValidContent: pageContent.length > 100
+            });
+          } else {
+            console.warn('❌ Failed to get page content:', {
+              success: contentResponse?.success,
+              error: contentResponse?.error,
+              hasData: !!contentResponse?.data
+            });
           }
         } catch (contentError) {
-          console.log('⚠️ Could not load page content:', contentError);
+          console.error('💥 Error loading page content:', {
+            error: contentError,
+            message: contentError instanceof Error ? contentError.message : 'Unknown error',
+            stack: contentError instanceof Error ? contentError.stack : undefined
+          });
         }
         
         setCurrentPageInfo({
@@ -459,8 +494,14 @@ const SidePanelInner: React.FC = () => {
           url: tab.url
         });
 
-        // Load agent suggestions based on current URL
-        setAgentSuggestions(getAgentSuggestions(tab.url));
+        // Load agent suggestions based on current mode and URL
+        console.log('🎯 Loading agent suggestions:', {
+          url: tab.url,
+          mode: suggestionMode,
+          hasPageContent: !!pageContent,
+          pageContentLength: pageContent.length
+        });
+        await loadAgentSuggestions(tab.url, pageContent);
       } else {
         console.log('⚠️ Could not get tab information, using fallback');
         setCurrentPageInfo({
@@ -489,6 +530,56 @@ const SidePanelInner: React.FC = () => {
       url: undefined
     });
   };
+
+  const loadAgentSuggestions = async (url: string, content?: string) => {
+    if (!url || typeof url !== 'string' || url.trim() === '') {
+      console.log('⚠️ loadAgentSuggestions called with invalid URL:', url);
+      setAgentSuggestions(getBasicSuggestions('about:blank'));
+      return;
+    }
+
+    try {
+      console.log('🔍 Loading agent suggestions:', { 
+        url, 
+        mode: suggestionMode, 
+        hasContent: !!content, 
+        contentLength: content?.length || 0,
+        hasTitle: !!currentPageInfo.title,
+        title: currentPageInfo.title,
+        conditionResult: suggestionMode === 'intelligent' && content && currentPageInfo.title
+      });
+      
+      if (suggestionMode === 'basic') {
+        console.log('📋 Loading basic suggestions for URL:', url);
+        const basicSuggestions = getBasicSuggestions(url);
+        console.log('📋 Basic suggestions loaded:', {
+          count: basicSuggestions.length,
+          titles: basicSuggestions.map(s => s.title)
+        });
+        setAgentSuggestions(basicSuggestions);
+      } else if (suggestionMode === 'intelligent' && content && currentPageInfo.title) {
+        console.log('🤖 Loading intelligent suggestions with data:', {
+          title: currentPageInfo.title,
+          contentLength: content.length,
+          contentPreview: content.substring(0, 100)
+        });
+        const suggestions = await getAgentSuggestions(url, 'intelligent', {
+          title: currentPageInfo.title,
+          content: content
+        });
+        console.log('✅ Intelligent suggestions loaded:', suggestions);
+        setAgentSuggestions(suggestions);
+      } else {
+        console.log('⚠️ Fallback to basic - mode:', suggestionMode, 'hasContent:', !!content, 'hasTitle:', !!currentPageInfo.title);
+        // Fallback to basic if intelligent mode but no content
+        setAgentSuggestions(getBasicSuggestions(url));
+      }
+    } catch (error) {
+      console.error('❌ Error loading agent suggestions:', error);
+      setAgentSuggestions(getBasicSuggestions(url));
+    }
+  };
+
 
   // Check if current tab is already manually attached
   const isCurrentTabAttached = () => {
@@ -1011,6 +1102,18 @@ const SidePanelInner: React.FC = () => {
       if (settingsResponse.data.selectedModel) {
         setSelectedModel(settingsResponse.data.selectedModel);
       }
+      // Set suggestion mode from settings
+      const intelligentEnabled = settingsResponse.data.ui?.intelligentSuggestionsEnabled ?? true;
+      console.log('🔧 Settings loaded - intelligent suggestions enabled:', intelligentEnabled);
+      setSuggestionMode(intelligentEnabled ? 'intelligent' : 'basic');
+      
+      // Reload suggestions with the updated mode
+      if (currentPageInfo.url) {
+        setTimeout(() => {
+          console.log('🔄 Reloading suggestions after settings load');
+          loadAgentSuggestions(currentPageInfo.url!, currentPageInfo.content);
+        }, 100); // Small delay to ensure state is updated
+      }
     }
   };
 
@@ -1481,11 +1584,28 @@ const SidePanelInner: React.FC = () => {
           <ThemeToggle />
           <div className="relative">
             <button
-              onClick={() => setShowChatMenu(!showChatMenu)}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setShowChatMenu(prev => !prev);
+              }}
               className="p-2 text-gray-600 dark:text-darkText-secondary hover:text-gray-900 dark:hover:text-darkText-primary hover:bg-gray-100 dark:hover:bg-darkBg-tertiary rounded-lg transition"
               title="Chat options"
             >
-              <Menu size={20} />
+              <div className="relative w-5 h-5">
+                <div className={`absolute inset-0 transition-all duration-300 ease-in-out ${
+                  showChatMenu ? 'rotate-45 opacity-0' : 'rotate-0 opacity-100'
+                }`}>
+                  <div className="w-full h-0.5 bg-current absolute top-1 rounded"></div>
+                  <div className="w-full h-0.5 bg-current absolute bottom-1 rounded"></div>
+                </div>
+                <div className={`absolute inset-0 transition-all duration-300 ease-in-out ${
+                  showChatMenu ? 'rotate-0 opacity-100' : 'rotate-45 opacity-0'
+                }`}>
+                  <div className="w-full h-0.5 bg-current absolute top-1/2 -translate-y-1/2 rotate-45 rounded"></div>
+                  <div className="w-full h-0.5 bg-current absolute top-1/2 -translate-y-1/2 -rotate-45 rounded"></div>
+                </div>
+              </div>
             </button>
             <ChatMenuPopover
               isOpen={showChatMenu}
@@ -1529,59 +1649,76 @@ const SidePanelInner: React.FC = () => {
           <div className="h-full flex flex-col">
             {/* Messages */}
             <div className="flex-1 overflow-auto p-2 space-y-2">
-              {chatMessages.length === 0 ? (
+              {chatMessages.length === 0 && (
                 <div className="h-full flex flex-col justify-end pb-6">
                   {/* Empty space at top */}
                   <div className="flex-1"></div>
 
-                  {/* Agent mode feature */}
-
-
-                  {/* Suggested prompts */}
-                  <div className="px-4 space-y-3">
-                    <div className="mb-4">
-                      <div className="text-sm font-medium text-gray-900 dark:text-darkText-primary mb-2">
-                        Agent mode{' '}
-                        <span className="inline-flex items-center bg-blue-600 text-white text-xs font-medium px-2 py-0.5 rounded">
-                          NEW
-                        </span>
+                  {/* Agent Suggestions - Show when no messages */}
+                  {agentSuggestions.length > 0 && (
+                    <div className="px-4 space-y-3">
+                      <div className="mb-4">
+                        <div className="mb-2">
+                          <div className="text-sm font-medium text-gray-900 dark:text-darkText-primary">
+                            Agent mode{' '}
+                            <span className="inline-flex items-center bg-blue-600 text-white text-xs font-medium px-2 py-0.5 rounded">
+                              NEW
+                            </span>
+                          </div>
+                        </div>
+                        <div className="text-xs text-gray-500 dark:text-darkText-tertiary">
+                          {suggestionMode === 'intelligent' ? 'AI-powered' : 'Context-aware'} prompts for {currentPageInfo.url ? (() => {
+                            try {
+                              return new URL(currentPageInfo.url).hostname.replace('www.', '');
+                            } catch {
+                              return 'this page';
+                            }
+                          })() : 'this page'}
+                        </div>
                       </div>
-                      <div className="text-xs text-gray-500 dark:text-darkText-tertiary">
-                        Context-aware AI prompts for {currentPageInfo.url ? (() => {
-                          try {
-                            return new URL(currentPageInfo.url).hostname.replace('www.', '');
-                          } catch {
-                            return 'this page';
-                          }
-                        })() : 'this page'}
-                      </div>
+                      {agentSuggestions.slice(0, 3).map((suggestion, index) => (
+                        <div
+                          key={index}
+                          className="relative group"
+                        >
+                          <button
+                            onClick={() => {
+                              setQuery(suggestion.prompt);
+                              // Auto-execute the prompt
+                              setTimeout(() => handleSendMessageWithTabs(), 100);
+                            }}
+                            className="w-full flex items-start gap-3 p-3 rounded-lg hover:bg-gray-50 dark:hover:bg-darkBg-tertiary transition text-left"
+                          >
+                            <div className="w-8 h-8 rounded-full bg-gray-100 dark:bg-darkBg-secondary flex items-center justify-center flex-shrink-0">
+                              <span className="text-lg">{suggestion.icon}</span>
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="text-sm font-medium text-gray-900 dark:text-darkText-primary mb-0.5">{suggestion.title}</div>
+                              <div className="text-xs text-gray-500 dark:text-darkText-tertiary">{suggestion.description}</div>
+                            </div>
+                          </button>
+                          {/* Pen icon for editing */}
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setQuery(suggestion.prompt);
+                              // Focus the input but don't auto-execute
+                            }}
+                            className="absolute top-2 right-2 p-1.5 bg-white dark:bg-darkBg-primary border border-gray-200 dark:border-darkBg-secondary rounded-lg shadow-sm hover:shadow-md hover:bg-gray-50 dark:hover:bg-darkBg-tertiary transition-all opacity-0 group-hover:opacity-100"
+                            title="Edit this prompt"
+                          >
+                            <Edit3 size={12} className="text-gray-600 dark:text-darkText-secondary" />
+                          </button>
+                        </div>
+                      ))}
                     </div>
-                    {agentSuggestions.map((suggestion, index) => (
-                      <button
-                        key={index}
-                        onClick={() => {
-                          setQuery(suggestion.prompt);
-                          // Auto-execute the prompt
-                          setTimeout(() => handleSendMessageWithTabs(), 100);
-                        }}
-                        className="w-full flex items-start gap-3 p-3 rounded-lg hover:bg-gray-50 dark:hover:bg-darkBg-tertiary transition text-left group"
-                      >
-                        <div className="w-8 h-8 rounded-full bg-gray-100 dark:bg-darkBg-secondary flex items-center justify-center flex-shrink-0">
-                          <span className="text-lg">{suggestion.icon}</span>
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="text-sm font-medium text-gray-900 dark:text-darkText-primary mb-0.5">{suggestion.title}</div>
-                          <div className="text-xs text-gray-500 dark:text-darkText-tertiary">{suggestion.description}</div>
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-
-
+                  )}
                 </div>
-              ) : (
-                <>
-                  {chatMessages.map((msg, idx) => (
+              )}
+
+              {/* Chat Messages */}
+              <>
+              {chatMessages.map((msg, idx) => (
                     <div
                       key={idx}
                       className={`max-w-[85%] ${msg.role === 'user' ? 'ml-auto' : 'mr-auto'
@@ -1598,46 +1735,69 @@ const SidePanelInner: React.FC = () => {
                         ) : (
                           <MarkdownRenderer content={msg.content} className="text-sm" />
                         )}
-                        {msg.toolExecutions && msg.toolExecutions.length > 0 && (
-                          <div className="mt-2 pt-2 border-t border-gray-200 dark:border-darkBg-secondary">
-                            <div className="text-xs text-gray-500 dark:text-darkText-tertiary mb-1.5 flex items-center gap-1">
-                              <Zap className="w-3 h-3" />
-                              Used {msg.toolExecutions.length} tool{msg.toolExecutions.length > 1 ? 's' : ''}:
-                            </div>
-                            <div className="space-y-1.5">
-                              {msg.toolExecutions.map((toolExec, i) => (
-                                <div 
-                                  key={i} 
-                                  className={`text-xs rounded px-2 py-1.5 ${
-                                    toolExec.success 
-                                      ? 'bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-300' 
-                                      : 'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300'
-                                  }`}
-                                >
-                                  <div className="flex items-center justify-between">
-                                    <span className="font-medium">{toolExec.toolName}</span>
-                                    {toolExec.executionTime && (
-                                      <span className="text-xs opacity-75 ml-2">
-                                        {toolExec.executionTime}ms
-                                      </span>
-                                    )}
-                                  </div>
-                                  {Object.keys(toolExec.args).length > 0 && (
-                                    <div className="mt-1 text-xs opacity-75">
-                                      {JSON.stringify(toolExec.args, null, 0).slice(0, 100)}
-                                      {JSON.stringify(toolExec.args).length > 100 ? '...' : ''}
+                        {msg.toolExecutions && msg.toolExecutions.length > 0 && (() => {
+                          const messageId = `${idx}-tools`;
+                          const isExpanded = expandedToolExecutions.has(messageId);
+                          
+                          return (
+                            <div className="mt-2 pt-2 border-t border-gray-200 dark:border-darkBg-secondary">
+                              <button
+                                onClick={() => {
+                                  const newExpanded = new Set(expandedToolExecutions);
+                                  if (isExpanded) {
+                                    newExpanded.delete(messageId);
+                                  } else {
+                                    newExpanded.add(messageId);
+                                  }
+                                  setExpandedToolExecutions(newExpanded);
+                                }}
+                                className="w-full text-xs text-gray-500 dark:text-darkText-tertiary flex items-center gap-1 hover:text-gray-700 dark:hover:text-darkText-secondary transition-colors"
+                              >
+                                <Zap className="w-3 h-3" />
+                                <span>Used {msg.toolExecutions.length} tool{msg.toolExecutions.length > 1 ? 's' : ''}</span>
+                                <ChevronDown 
+                                  className={`w-3 h-3 transition-transform duration-200 ${
+                                    isExpanded ? 'rotate-180' : 'rotate-0'
+                                  }`} 
+                                />
+                              </button>
+                              {isExpanded && (
+                                <div className="mt-2 space-y-1.5">
+                                  {msg.toolExecutions.map((toolExec, i) => (
+                                    <div 
+                                      key={i} 
+                                      className={`text-xs rounded px-2 py-1.5 ${
+                                        toolExec.success 
+                                          ? 'bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-300' 
+                                          : 'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300'
+                                      }`}
+                                    >
+                                      <div className="flex items-center justify-between">
+                                        <span className="font-medium">{toolExec.toolName}</span>
+                                        {toolExec.executionTime && (
+                                          <span className="text-xs opacity-75 ml-2">
+                                            {toolExec.executionTime}ms
+                                          </span>
+                                        )}
+                                      </div>
+                                      {Object.keys(toolExec.args).length > 0 && (
+                                        <div className="mt-1 text-xs opacity-75 break-all overflow-hidden">
+                                          {JSON.stringify(toolExec.args, null, 0).slice(0, 100)}
+                                          {JSON.stringify(toolExec.args).length > 100 ? '...' : ''}
+                                        </div>
+                                      )}
+                                      {toolExec.error && (
+                                        <div className="mt-1 text-xs opacity-90">
+                                          Error: {toolExec.error}
+                                        </div>
+                                      )}
                                     </div>
-                                  )}
-                                  {toolExec.error && (
-                                    <div className="mt-1 text-xs opacity-90">
-                                      Error: {toolExec.error}
-                                    </div>
-                                  )}
+                                  ))}
                                 </div>
-                              ))}
+                              )}
                             </div>
-                          </div>
-                        )}
+                          );
+                        })()}
                         {msg.usedMemories && msg.usedMemories.length > 0 && (
                           <div className="mt-2 pt-2 border-t border-gray-200 dark:border-darkBg-secondary">
                             <div className="text-xs text-gray-500 dark:text-darkText-tertiary mb-1">
@@ -1666,9 +1826,10 @@ const SidePanelInner: React.FC = () => {
                       </div>
                     </div>
                   )}
+
+
                   <div ref={chatEndRef} />
                 </>
-              )}
             </div>
 
             {/* Upload Progress */}
@@ -1698,6 +1859,82 @@ const SidePanelInner: React.FC = () => {
                     </div>
                   ) : null}
                 </div>
+              </div>
+            )}
+
+            {/* Sticky Suggestions - Bottom of Chat */}
+            {agentSuggestions.length > 0 && chatMessages.length > 0 && (
+              <div className="border-t border-gray-200 dark:border-darkBg-secondary bg-white dark:bg-darkBg-primary">
+                {/* Header with minimize button */}
+                <div className="flex items-center justify-between px-4 py-2 border-b border-gray-200 dark:border-darkBg-secondary">
+                  <div className="flex items-center gap-2">
+                    <div className="text-sm font-medium text-gray-900 dark:text-darkText-primary">
+                      Suggested actions
+                    </div>
+                    <span className="inline-flex items-center bg-blue-600 text-white text-xs font-medium px-2 py-0.5 rounded">
+                      NEW
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => setSuggestionsMinimized(!suggestionsMinimized)}
+                    className="p-1 text-gray-500 dark:text-darkText-tertiary hover:text-gray-700 dark:hover:text-darkText-secondary transition-colors rounded"
+                    title={suggestionsMinimized ? 'Expand suggestions' : 'Minimize suggestions'}
+                  >
+                    {suggestionsMinimized ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                  </button>
+                </div>
+                
+                {/* Suggestions content - collapsible */}
+                {!suggestionsMinimized && (
+                  <div className="px-4 py-3">
+                    <div className="text-xs text-gray-500 dark:text-darkText-tertiary mb-3">
+                      {suggestionMode === 'intelligent' ? 'AI-powered' : 'Context-aware'} prompts for {currentPageInfo.url ? (() => {
+                        try {
+                          return new URL(currentPageInfo.url).hostname.replace('www.', '');
+                        } catch {
+                          return 'this page';
+                        }
+                      })() : 'this page'}
+                    </div>
+                    <div className="space-y-2">
+                      {agentSuggestions.slice(0, 3).map((suggestion, index) => (
+                        <div
+                          key={index}
+                          className="relative group"
+                        >
+                          <button
+                            onClick={() => {
+                              setQuery(suggestion.prompt);
+                              // Auto-execute the prompt
+                              setTimeout(() => handleSendMessageWithTabs(), 100);
+                            }}
+                            className="w-full flex items-start gap-3 p-2 rounded-lg hover:bg-gray-50 dark:hover:bg-darkBg-tertiary transition text-left border border-gray-200 dark:border-darkBg-secondary"
+                          >
+                            <div className="w-7 h-7 rounded-full bg-gray-100 dark:bg-darkBg-secondary flex items-center justify-center flex-shrink-0">
+                              <span className="text-sm">{suggestion.icon}</span>
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="text-sm font-medium text-gray-900 dark:text-darkText-primary mb-0.5">{suggestion.title}</div>
+                              <div className="text-xs text-gray-500 dark:text-darkText-tertiary line-clamp-2">{suggestion.description}</div>
+                            </div>
+                          </button>
+                          {/* Pen icon for editing */}
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setQuery(suggestion.prompt);
+                              // Focus the input but don't auto-execute
+                            }}
+                            className="absolute top-1 right-1 p-1.5 bg-white dark:bg-darkBg-primary border border-gray-200 dark:border-darkBg-secondary rounded-lg shadow-sm hover:shadow-md hover:bg-gray-50 dark:hover:bg-darkBg-tertiary transition-all opacity-0 group-hover:opacity-100"
+                            title="Edit this prompt"
+                          >
+                            <Edit3 size={12} className="text-gray-600 dark:text-darkText-secondary" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
@@ -1857,19 +2094,32 @@ const SidePanelInner: React.FC = () => {
                 </div>
               )}
               
-              <div className="flex gap-2">
-                {/* Upload Button */}
-                <div className="relative">
+              {/* New layout with corner buttons and full-width textarea */}
+              <div className="relative">
+                {/* Full-width text area */}
+                <MentionInput
+                  ref={chatInputRef}
+                  value={query}
+                  onChange={setQuery}
+                  onKeyPress={(e) => e.key === 'Enter' && handleSendMessageWithTabs()}
+                  onTabMention={handleTabMention}
+                  placeholder="Ask anything (use @ to mention tabs, Shift+Enter for new line)"
+                  disabled={isLoading}
+                  className="w-full pl-12 pr-12 py-3 focus:outline-none bg-transparent text-gray-900 dark:text-darkText-primary placeholder:text-gray-500 dark:placeholder:text-darkText-tertiary"
+                />
+                
+                {/* Upload Button - Bottom Left */}
+                <div className="absolute bottom-1 left-1">
                   <button
                     onClick={toggleUploadPopover}
-                    className="px-3 py-3 text-gray-600 dark:text-darkText-secondary hover:text-gray-900 dark:hover:text-darkText-primary transition"
+                    className="p-2 text-gray-600 dark:text-darkText-secondary hover:text-gray-900 dark:hover:text-darkText-primary transition rounded-lg hover:bg-gray-100 dark:hover:bg-darkBg-tertiary"
                     disabled={isLoading || uploadProgress.isUploading}
                     title="Quick actions"
                   >
                     {uploadProgress.isUploading ? (
-                      <Loader2 size={18} className="animate-spin" />
+                      <Loader2 size={16} className="animate-spin" />
                     ) : (
-                      <Plus size={18} />
+                      <Plus size={16} />
                     )}
                   </button>
 
@@ -1893,42 +2143,24 @@ const SidePanelInner: React.FC = () => {
                     disabled={uploadProgress.isUploading}
                   />
                 </div>
-
-                <MentionInput
-                  ref={chatInputRef}
-                  value={query}
-                  onChange={setQuery}
-                  onKeyPress={(e) => e.key === 'Enter' && handleSendMessageWithTabs()}
-                  onTabMention={handleTabMention}
-                  placeholder="Ask anything (use @ to mention tabs)"
-                  disabled={isLoading}
-                  className="w-full px-2 py-3 focus:outline-none bg-transparent text-gray-900 dark:text-darkText-primary placeholder:text-gray-500 dark:placeholder:text-darkText-tertiary"
-                />
                 
-                {/* Voice Chat Button */}
-                {!isVoiceChatActive ? (
-                  <button
-                    onClick={handleStartVoiceChat}
-                    disabled={isConnecting || !settings?.apiKey}
-                    className="px-3 py-3 text-gray-600 dark:text-darkText-secondary hover:text-blue-600 dark:hover:text-blue-400 transition disabled:opacity-50 disabled:cursor-not-allowed"
-                    title={!settings?.apiKey ? 'API key required for voice chat' : 'Start voice chat'}
-                  >
-                    {isConnecting ? (
-                      <Loader2 size={18} className="animate-spin" />
-                    ) : (
-                      <Mic size={18} />
-                    )}
-                  </button>
-                ) : null}
-                
-                <button
-                  onClick={handleSendMessageWithTabs}
-                  disabled={isLoading || (!query.trim() && stagedImages.length === 0)}
-                  className="px-3 py-3 text-gray-600 dark:text-darkText-secondary hover:text-gray-900 dark:hover:text-darkText-primary transition disabled:opacity-50 disabled:cursor-not-allowed"
-                  title="Send message"
-                >
-                  <Send size={18} />
-                </button>
+                {/* Voice Chat Button - Bottom Right */}
+                {!isVoiceChatActive && (
+                  <div className="absolute bottom-1 right-1">
+                    <button
+                      onClick={handleStartVoiceChat}
+                      disabled={isConnecting || !settings?.apiKey}
+                      className="p-2 text-gray-600 dark:text-darkText-secondary hover:text-blue-600 dark:hover:text-blue-400 transition rounded-lg hover:bg-gray-100 dark:hover:bg-darkBg-tertiary disabled:opacity-50 disabled:cursor-not-allowed"
+                      title={!settings?.apiKey ? 'API key required for voice chat' : 'Start voice chat'}
+                    >
+                      {isConnecting ? (
+                        <Loader2 size={16} className="animate-spin" />
+                      ) : (
+                        <Mic size={16} />
+                      )}
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           </div>
