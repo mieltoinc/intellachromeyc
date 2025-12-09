@@ -85,6 +85,7 @@ const SidePanelInner: React.FC = () => {
   const [selectedModel, setSelectedModel] = useState<string>('gpt-4o');
 
   // State tab variables (from popup)
+  // Start with null (loading) - will be set quickly by fast auth check
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
   const [recentMemories, setRecentMemories] = useState<Memory[]>([]);
   const [settings, setSettings] = useState<UserSettings | null>(null);
