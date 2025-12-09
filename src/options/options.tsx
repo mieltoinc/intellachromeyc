@@ -937,6 +937,32 @@ const OptionsInner: React.FC = () => {
                       className="w-5 h-5 text-orange-600 rounded focus:ring-orange-500"
                     />
                   </label>
+
+                  <label className="flex items-center justify-between p-4 bg-purple-50 dark:bg-darkBg-secondary/50 rounded-lg cursor-pointer border border-purple-200 dark:border-purple-800">
+                    <div>
+                      <div className="font-medium text-gray-900 dark:text-darkText-primary flex items-center gap-2">
+                        🧠 Intelligent Suggestions
+                        <span className="text-xs bg-purple-100 dark:bg-purple-900 text-purple-600 dark:text-purple-300 px-2 py-1 rounded-full">
+                          AI
+                        </span>
+                      </div>
+                      <div className="text-sm text-gray-500 dark:text-darkText-tertiary">
+                        Use AI to generate personalized page action suggestions instead of basic ones
+                      </div>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={settings.ui?.intelligentSuggestionsEnabled ?? true}
+                      onChange={(e) => setSettings({ 
+                        ...settings, 
+                        ui: { 
+                          ...settings.ui, 
+                          intelligentSuggestionsEnabled: e.target.checked 
+                        } 
+                      })}
+                      className="w-5 h-5 text-purple-600 rounded focus:ring-purple-500"
+                    />
+                  </label>
                 </div>
               </div>
 

@@ -151,12 +151,20 @@ export class AISDKClient {
   ): Promise<AIResponse> {
     await this.initialize();
 
+    console.log('🔧 AI SDK Client received options:', { 
+      optionsModel: options.model, 
+      configModel: this.config.model,
+      fullOptions: options 
+    });
+
     const {
-      model = this.config.model || 'gpt-4o',
+      model = this.config.model || 'gpt-5-mini',
       temperature = this.config.temperature || 0.7,
-      // maxTokens = this.config.maxTokens || 2048,
+      maxTokens = this.config.maxTokens || 2048,
       enableTools = true,
     } = options;
+
+    console.log('🎯 Final model selected:', model);
 
     // Check if this is a model that doesn't support temperature
     // Reasoning models (o1, o3) and GPT-5 models don't support temperature
@@ -331,6 +339,7 @@ export class AISDKClient {
             messages: conversationMessages as any,
             tools,
             stopWhen: stepCountIs(5),
+            maxTokens,
           };
           // Only add temperature if the model supports it
           if (effectiveTemperature !== undefined) {
@@ -342,6 +351,7 @@ export class AISDKClient {
           const streamConfig: any = {
             model: languageModel,
             messages: conversationMessages as any,
+            maxTokens,
           };
           // Only add temperature if the model supports it
           if (effectiveTemperature !== undefined) {
@@ -383,6 +393,7 @@ export class AISDKClient {
             messages: conversationMessages as any,
             tools,
             maxSteps: 5,
+            maxTokens,
           };
           // Only add temperature if the model supports it
           if (effectiveTemperature !== undefined) {
@@ -394,6 +405,7 @@ export class AISDKClient {
           const generateConfig: any = {
             model: languageModel,
             messages: conversationMessages as any,
+            maxTokens,
           };
           // Only add temperature if the model supports it
           if (effectiveTemperature !== undefined) {
@@ -443,10 +455,18 @@ export class AISDKClient {
     await this.initialize();
 
     const {
-      model = this.config.model || 'gpt-4o',
+      model = this.config.model || 'gpt-5-mini',
       temperature = this.config.temperature || 0.7,
       maxTokens = this.config.maxTokens || 2048,
     } = options;
+
+    // Check if this is a model that doesn't support temperature
+    const isReasoningModel = model.includes('o1') || model.includes('o3');
+    const isGPT5Model = model.toLowerCase().includes('gpt-5');
+    const supportsTemperature = !isReasoningModel && !isGPT5Model;
+
+    // Only pass temperature if the model supports it
+    const effectiveTemperature = supportsTemperature ? temperature : undefined;
 
     try {
       const apiKey = await this.getApiKey();
@@ -492,7 +512,7 @@ export class AISDKClient {
             role: msg.role as 'user' | 'assistant' | 'system',
             content: msg.content,
           })),
-        temperature,
+        temperature: effectiveTemperature,
         maxTokens,
       } as any);
 

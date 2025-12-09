@@ -21,7 +21,7 @@ interface MentionInputProps {
   className?: string;
 }
 
-export const MentionInput = React.forwardRef<HTMLInputElement, MentionInputProps>(({
+export const MentionInput = React.forwardRef<HTMLTextAreaElement, MentionInputProps>(({
   value,
   onChange,
   onKeyPress,
@@ -35,7 +35,21 @@ export const MentionInput = React.forwardRef<HTMLInputElement, MentionInputProps
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [mentionMatch, setMentionMatch] = useState<MentionMatch | null>(null);
   const [allTabs, setAllTabs] = useState<TabInfo[]>([]);
-  const inputRef = ref as React.RefObject<HTMLInputElement> || useRef<HTMLInputElement>(null);
+  const inputRef = ref as React.RefObject<HTMLTextAreaElement> || useRef<HTMLTextAreaElement>(null);
+
+  // Auto-expand textarea functionality
+  const adjustTextareaHeight = () => {
+    const textarea = inputRef.current;
+    if (textarea) {
+      textarea.style.height = 'auto';
+      textarea.style.height = `${Math.min(textarea.scrollHeight, 120)}px`; // Max height of ~5 lines
+    }
+  };
+
+  // Adjust height when value changes
+  useEffect(() => {
+    adjustTextareaHeight();
+  }, [value]);
 
   // Load all tabs when component mounts
   useEffect(() => {
@@ -128,6 +142,16 @@ export const MentionInput = React.forwardRef<HTMLInputElement, MentionInputProps
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    // Allow standard keyboard shortcuts (Cmd/Ctrl + A, C, V, X, Z, etc.) to pass through
+    const isStandardShortcut = (e.metaKey || e.ctrlKey) && (
+      ['a', 'c', 'v', 'x', 'z', 'y'].includes(e.key.toLowerCase())
+    );
+    
+    if (isStandardShortcut) {
+      // Let browser handle standard shortcuts
+      return;
+    }
+    
     if (showSuggestions && suggestions.length > 0) {
       switch (e.key) {
         case 'ArrowDown':
@@ -153,23 +177,30 @@ export const MentionInput = React.forwardRef<HTMLInputElement, MentionInputProps
       }
     } else {
       // Pass through to parent if not handling suggestions
-      if (e.key === 'Enter') {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        // Enter sends the message (unless Shift is held)
+        e.preventDefault();
         onKeyPress(e);
       }
+      // Shift+Enter adds a new line (default textarea behavior when not prevented)
     }
   };
 
   return (
     <div className="relative flex-1">
-      <input
+      <textarea
         ref={inputRef}
-        type="text"
         value={value}
-        onChange={(e) => onChange(e.target.value)}
+        onChange={(e) => {
+          onChange(e.target.value);
+          adjustTextareaHeight();
+        }}
         onKeyDown={handleKeyDown}
         placeholder={placeholder}
         disabled={disabled}
-        className={className}
+        className={`${className} [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]`}
+        rows={1}
+        style={{ resize: 'none', overflow: 'auto' }}
       />
       
       {/* Mention suggestions dropdown */}
