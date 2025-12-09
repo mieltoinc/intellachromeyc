@@ -24,7 +24,7 @@ import { getFirstActiveApiKey } from '@/handlers/apikey.handler';
 import { mieltoAuth } from '@/lib/auth';
 import { ThemeProvider } from '@/components/ThemeContext';
 import { ThemeToggle } from '@/components/ThemeToggle';
-import { getAgentSuggestions, getBasicSuggestions, type AgentSuggestion, type SuggestionMode } from '@/utils/agent-suggestions';
+import { getBasicSuggestions, getIntelligentSuggestions, type AgentSuggestion, type SuggestionMode } from '@/utils/agent-suggestions';
 import '../styles/app.css';
 
 interface ToolExecution {
@@ -103,9 +103,10 @@ const SidePanelInner: React.FC = () => {
   const [faviconError, setFaviconError] = useState(false);
 
   // Agent mode suggestions
-  const [agentSuggestions, setAgentSuggestions] = useState<AgentSuggestion[]>(getBasicSuggestions(''));
-  const [suggestionMode, setSuggestionMode] = useState<SuggestionMode>('basic');
+  const [agentSuggestions, setAgentSuggestions] = useState<AgentSuggestion[]>([]);
+  const [suggestionMode, setSuggestionMode] = useState<SuggestionMode>('intelligent'); // Default to intelligent
   const [suggestionsMinimized, setSuggestionsMinimized] = useState(false);
+  const [intelligentSuggestionsLoaded, setIntelligentSuggestionsLoaded] = useState(false);
   const [expandedToolExecutions, setExpandedToolExecutions] = useState<Set<string>>(new Set());
 
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -118,8 +119,14 @@ const SidePanelInner: React.FC = () => {
     loadMemories();
     checkForFloatingQuery();
     loadConversations();
-    checkAuthAndLoadData();
-    loadCurrentPageInfo();
+    
+    // Initialize settings first, then load page info
+    const initializeData = async () => {
+      await checkAuthAndLoadData();
+      await loadCurrentPageInfo();
+    };
+    
+    initializeData();
     loadSelectedModel();
 
     // Establish connection with background script for close detection
@@ -494,14 +501,26 @@ const SidePanelInner: React.FC = () => {
           url: tab.url
         });
 
-        // Load agent suggestions based on current mode and URL
-        console.log('🎯 Loading agent suggestions:', {
-          url: tab.url,
-          mode: suggestionMode,
-          hasPageContent: !!pageContent,
-          pageContentLength: pageContent.length
-        });
-        await loadAgentSuggestions(tab.url, pageContent);
+        // Load basic suggestions immediately, then load intelligent ones
+        if (tab.url) {
+          setAgentSuggestions(getBasicSuggestions(tab.url));
+          setIntelligentSuggestionsLoaded(false);
+          
+          // Auto-load intelligent suggestions after a short delay if we have the necessary data
+          setTimeout(async () => {
+            if (suggestionMode === 'intelligent' && tab.title && pageContent) {
+              try {
+                console.log('🚀 Auto-loading intelligent suggestions on page load');
+                const intelligentSuggestions = await getIntelligentSuggestions(tab.url!, tab.title, pageContent);
+                setAgentSuggestions(intelligentSuggestions);
+                setIntelligentSuggestionsLoaded(true);
+              } catch (error) {
+                console.error('❌ Failed to auto-load intelligent suggestions:', error);
+                // Keep basic suggestions as fallback
+              }
+            }
+          }, 100); // Small delay to let basic suggestions show first
+        }
       } else {
         console.log('⚠️ Could not get tab information, using fallback');
         setCurrentPageInfo({
@@ -531,55 +550,20 @@ const SidePanelInner: React.FC = () => {
     });
   };
 
-  const loadAgentSuggestions = async (url: string, content?: string) => {
-    if (!url || typeof url !== 'string' || url.trim() === '') {
-      console.log('⚠️ loadAgentSuggestions called with invalid URL:', url);
-      setAgentSuggestions(getBasicSuggestions('about:blank'));
-      return;
-    }
 
-    try {
-      console.log('🔍 Loading agent suggestions:', { 
-        url, 
-        mode: suggestionMode, 
-        hasContent: !!content, 
-        contentLength: content?.length || 0,
-        hasTitle: !!currentPageInfo.title,
-        title: currentPageInfo.title,
-        conditionResult: suggestionMode === 'intelligent' && content && currentPageInfo.title
-      });
-      
-      if (suggestionMode === 'basic') {
-        console.log('📋 Loading basic suggestions for URL:', url);
-        const basicSuggestions = getBasicSuggestions(url);
-        console.log('📋 Basic suggestions loaded:', {
-          count: basicSuggestions.length,
-          titles: basicSuggestions.map(s => s.title)
-        });
-        setAgentSuggestions(basicSuggestions);
-      } else if (suggestionMode === 'intelligent' && content && currentPageInfo.title) {
-        console.log('🤖 Loading intelligent suggestions with data:', {
-          title: currentPageInfo.title,
-          contentLength: content.length,
-          contentPreview: content.substring(0, 100)
-        });
-        const suggestions = await getAgentSuggestions(url, 'intelligent', {
-          title: currentPageInfo.title,
-          content: content
-        });
-        console.log('✅ Intelligent suggestions loaded:', suggestions);
-        setAgentSuggestions(suggestions);
-      } else {
-        console.log('⚠️ Fallback to basic - mode:', suggestionMode, 'hasContent:', !!content, 'hasTitle:', !!currentPageInfo.title);
-        // Fallback to basic if intelligent mode but no content
-        setAgentSuggestions(getBasicSuggestions(url));
+  const loadIntelligentSuggestionsOnDemand = async () => {
+    if (!intelligentSuggestionsLoaded && suggestionMode === 'intelligent' && currentPageInfo.url && currentPageInfo.content && currentPageInfo.title) {
+      setIntelligentSuggestionsLoaded(true);
+      try {
+        console.log('🚀 Loading intelligent suggestions on demand');
+        const intelligentSuggestions = await getIntelligentSuggestions(currentPageInfo.url, currentPageInfo.title, currentPageInfo.content);
+        setAgentSuggestions(intelligentSuggestions);
+      } catch (error) {
+        console.error('❌ Failed to load intelligent suggestions:', error);
+        // Keep basic suggestions as fallback
       }
-    } catch (error) {
-      console.error('❌ Error loading agent suggestions:', error);
-      setAgentSuggestions(getBasicSuggestions(url));
     }
   };
-
 
   // Check if current tab is already manually attached
   const isCurrentTabAttached = () => {
@@ -1105,14 +1089,37 @@ const SidePanelInner: React.FC = () => {
       // Set suggestion mode from settings
       const intelligentEnabled = settingsResponse.data.ui?.intelligentSuggestionsEnabled ?? true;
       console.log('🔧 Settings loaded - intelligent suggestions enabled:', intelligentEnabled);
-      setSuggestionMode(intelligentEnabled ? 'intelligent' : 'basic');
+      const newMode = intelligentEnabled ? 'intelligent' : 'basic';
+      console.log('🔧 Setting suggestion mode to:', newMode);
+      setSuggestionMode(newMode);
       
-      // Reload suggestions with the updated mode
+      // Reload suggestions with the updated mode immediately
       if (currentPageInfo.url) {
-        setTimeout(() => {
-          console.log('🔄 Reloading suggestions after settings load');
-          loadAgentSuggestions(currentPageInfo.url!, currentPageInfo.content);
-        }, 100); // Small delay to ensure state is updated
+        console.log('🔄 Immediately reloading suggestions with mode:', newMode);
+        // Use the new mode directly instead of relying on state update
+        if (newMode === 'intelligent') {
+          // Load basic first as placeholder
+          setAgentSuggestions(getBasicSuggestions(currentPageInfo.url));
+          
+          // Try intelligent if we have content
+          if (currentPageInfo.content && currentPageInfo.title) {
+            try {
+              const intelligentSuggestions = await getIntelligentSuggestions(
+                currentPageInfo.url, 
+                currentPageInfo.title, 
+                currentPageInfo.content
+              );
+              console.log('✅ Settings reload - Intelligent suggestions loaded:', intelligentSuggestions);
+              setAgentSuggestions(intelligentSuggestions);
+            } catch (error) {
+              console.error('❌ Settings reload - Intelligent suggestions failed:', error);
+            }
+          } else {
+            console.log('⚠️ Settings reload - Missing content for intelligent suggestions');
+          }
+        } else {
+          setAgentSuggestions(getBasicSuggestions(currentPageInfo.url));
+        }
       }
     }
   };
@@ -1649,72 +1656,6 @@ const SidePanelInner: React.FC = () => {
           <div className="h-full flex flex-col">
             {/* Messages */}
             <div className="flex-1 overflow-auto p-2 space-y-2">
-              {chatMessages.length === 0 && (
-                <div className="h-full flex flex-col justify-end pb-6">
-                  {/* Empty space at top */}
-                  <div className="flex-1"></div>
-
-                  {/* Agent Suggestions - Show when no messages */}
-                  {agentSuggestions.length > 0 && (
-                    <div className="px-4 space-y-3">
-                      <div className="mb-4">
-                        <div className="mb-2">
-                          <div className="text-sm font-medium text-gray-900 dark:text-darkText-primary">
-                            Agent mode{' '}
-                            <span className="inline-flex items-center bg-blue-600 text-white text-xs font-medium px-2 py-0.5 rounded">
-                              NEW
-                            </span>
-                          </div>
-                        </div>
-                        <div className="text-xs text-gray-500 dark:text-darkText-tertiary">
-                          {suggestionMode === 'intelligent' ? 'AI-powered' : 'Context-aware'} prompts for {currentPageInfo.url ? (() => {
-                            try {
-                              return new URL(currentPageInfo.url).hostname.replace('www.', '');
-                            } catch {
-                              return 'this page';
-                            }
-                          })() : 'this page'}
-                        </div>
-                      </div>
-                      {agentSuggestions.slice(0, 3).map((suggestion, index) => (
-                        <div
-                          key={index}
-                          className="relative group"
-                        >
-                          <button
-                            onClick={() => {
-                              setQuery(suggestion.prompt);
-                              // Auto-execute the prompt
-                              setTimeout(() => handleSendMessageWithTabs(), 100);
-                            }}
-                            className="w-full flex items-start gap-3 p-3 rounded-lg hover:bg-gray-50 dark:hover:bg-darkBg-tertiary transition text-left"
-                          >
-                            <div className="w-8 h-8 rounded-full bg-gray-100 dark:bg-darkBg-secondary flex items-center justify-center flex-shrink-0">
-                              <span className="text-lg">{suggestion.icon}</span>
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <div className="text-sm font-medium text-gray-900 dark:text-darkText-primary mb-0.5">{suggestion.title}</div>
-                              <div className="text-xs text-gray-500 dark:text-darkText-tertiary">{suggestion.description}</div>
-                            </div>
-                          </button>
-                          {/* Pen icon for editing */}
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setQuery(suggestion.prompt);
-                              // Focus the input but don't auto-execute
-                            }}
-                            className="absolute top-2 right-2 p-1.5 bg-white dark:bg-darkBg-primary border border-gray-200 dark:border-darkBg-secondary rounded-lg shadow-sm hover:shadow-md hover:bg-gray-50 dark:hover:bg-darkBg-tertiary transition-all opacity-0 group-hover:opacity-100"
-                            title="Edit this prompt"
-                          >
-                            <Edit3 size={12} className="text-gray-600 dark:text-darkText-secondary" />
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
 
               {/* Chat Messages */}
               <>
@@ -1862,33 +1803,14 @@ const SidePanelInner: React.FC = () => {
               </div>
             )}
 
-            {/* Sticky Suggestions - Bottom of Chat */}
-            {agentSuggestions.length > 0 && chatMessages.length > 0 && (
-              <div className="border-t border-gray-200 dark:border-darkBg-secondary bg-white dark:bg-darkBg-primary">
+            {/* Suggestions - Always show when available */}
+            {agentSuggestions.length > 0 && (
+              <div className="bg-white dark:bg-darkBg-primary">
                 {/* Header with minimize button */}
-                <div className="flex items-center justify-between px-4 py-2 border-b border-gray-200 dark:border-darkBg-secondary">
+                <div className="flex items-center justify-between px-4 py-2 bg-white dark:bg-darkBg-primary">
                   <div className="flex items-center gap-2">
-                    <div className="text-sm font-medium text-gray-900 dark:text-darkText-primary">
-                      Suggested actions
-                    </div>
-                    <span className="inline-flex items-center bg-blue-600 text-white text-xs font-medium px-2 py-0.5 rounded">
-                      NEW
-                    </span>
-                  </div>
-                  <button
-                    onClick={() => setSuggestionsMinimized(!suggestionsMinimized)}
-                    className="p-1 text-gray-500 dark:text-darkText-tertiary hover:text-gray-700 dark:hover:text-darkText-secondary transition-colors rounded"
-                    title={suggestionsMinimized ? 'Expand suggestions' : 'Minimize suggestions'}
-                  >
-                    {suggestionsMinimized ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-                  </button>
-                </div>
-                
-                {/* Suggestions content - collapsible */}
-                {!suggestionsMinimized && (
-                  <div className="px-4 py-3">
-                    <div className="text-xs text-gray-500 dark:text-darkText-tertiary mb-3">
-                      {suggestionMode === 'intelligent' ? 'AI-powered' : 'Context-aware'} prompts for {currentPageInfo.url ? (() => {
+                    <div className="text-sm font-medium text-gray-700 dark:text-darkText-primary">
+                      {suggestionMode === 'intelligent' ? 'Intelligent' : ''} Prompts for {currentPageInfo.url ? (() => {
                         try {
                           return new URL(currentPageInfo.url).hostname.replace('www.', '');
                         } catch {
@@ -1896,6 +1818,29 @@ const SidePanelInner: React.FC = () => {
                         }
                       })() : 'this page'}
                     </div>
+                    <span className="inline-flex items-center bg-blue-600 text-white text-xs font-medium px-2 py-0.5 rounded">
+                      NEW
+                    </span>
+                  </div>
+                  <button
+                    onClick={async () => {
+                      if (suggestionsMinimized) {
+                        await loadIntelligentSuggestionsOnDemand();
+                      }
+                      setSuggestionsMinimized(!suggestionsMinimized);
+                    }}
+                    className="p-1 text-gray-500 dark:text-darkText-tertiary hover:text-gray-700 dark:hover:text-darkText-secondary transition-colors rounded"
+                    title={suggestionsMinimized ? 'Expand suggestions' : 'Minimize suggestions'}
+                  >
+                    {suggestionsMinimized ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                  </button>
+                </div>
+                
+                {/* Suggestions content - collapsible with animation */}
+                <div className={`overflow-hidden transition-all duration-300 ease-in-out ${
+                  suggestionsMinimized ? 'max-h-0 opacity-0' : 'max-h-96 opacity-100'
+                }`}>
+                  <div className="px-4 py-3">
                     <div className="space-y-2">
                       {agentSuggestions.slice(0, 3).map((suggestion, index) => (
                         <div
@@ -1908,7 +1853,7 @@ const SidePanelInner: React.FC = () => {
                               // Auto-execute the prompt
                               setTimeout(() => handleSendMessageWithTabs(), 100);
                             }}
-                            className="w-full flex items-start gap-3 p-2 rounded-lg hover:bg-gray-50 dark:hover:bg-darkBg-tertiary transition text-left border border-gray-200 dark:border-darkBg-secondary"
+                            className="w-full flex items-start gap-3 p-2 rounded-lg hover:bg-gray-50 dark:hover:bg-darkBg-tertiary transition text-left"
                           >
                             <div className="w-7 h-7 rounded-full bg-gray-100 dark:bg-darkBg-secondary flex items-center justify-center flex-shrink-0">
                               <span className="text-sm">{suggestion.icon}</span>
@@ -1925,7 +1870,7 @@ const SidePanelInner: React.FC = () => {
                               setQuery(suggestion.prompt);
                               // Focus the input but don't auto-execute
                             }}
-                            className="absolute top-1 right-1 p-1.5 bg-white dark:bg-darkBg-primary border border-gray-200 dark:border-darkBg-secondary rounded-lg shadow-sm hover:shadow-md hover:bg-gray-50 dark:hover:bg-darkBg-tertiary transition-all opacity-0 group-hover:opacity-100"
+                            className="absolute top-1 right-1 p-1.5 bg-white dark:bg-darkBg-primary rounded-lg shadow-sm hover:shadow-md hover:bg-gray-50 dark:hover:bg-darkBg-tertiary transition-all opacity-0 group-hover:opacity-100"
                             title="Edit this prompt"
                           >
                             <Edit3 size={12} className="text-gray-600 dark:text-darkText-secondary" />
@@ -1934,7 +1879,7 @@ const SidePanelInner: React.FC = () => {
                       ))}
                     </div>
                   </div>
-                )}
+                </div>
               </div>
             )}
 
