@@ -10,6 +10,17 @@ export interface AgentSuggestion {
   prompt: string;
 }
 
+export type SuggestionMode = 'basic' | 'intelligent';
+
+interface CachedSuggestions {
+  url: string;
+  urlHash: string;
+  suggestions: AgentSuggestion[];
+  timestamp: number;
+  pageTitle: string;
+  contentHash: string;
+}
+
 interface DomainPattern {
   pattern: RegExp;
   suggestions: AgentSuggestion[];
@@ -240,16 +251,161 @@ const defaultSuggestions: AgentSuggestion[] = [
   },
 ];
 
+// Cache for intelligent suggestions (in-memory, per session)
+const intelligentSuggestionsCache = new Map<string, CachedSuggestions>();
+
+// Cache expiry time (30 minutes)
+const CACHE_EXPIRY_MS = 30 * 60 * 1000;
+
 /**
- * Get agent suggestions for a given URL
+ * Generate a hash for URL + content to detect significant page changes
  */
-export function getAgentSuggestions(url: string): AgentSuggestion[] {
+function generateContentHash(url: string, title: string, content: string): string {
+  const combined = `${url}|${title}|${content.substring(0, 500)}`;
+  // Simple hash function (for demo - could use crypto.subtle in production)
+  let hash = 0;
+  for (let i = 0; i < combined.length; i++) {
+    const char = combined.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash; // Convert to 32bit integer
+  }
+  return hash.toString(36);
+}
+
+/**
+ * Get cached suggestions if available and still valid
+ */
+function getCachedSuggestions(url: string, title: string, content: string): AgentSuggestion[] | null {
+  const contentHash = generateContentHash(url, title, content);
+  const cached = intelligentSuggestionsCache.get(url);
+
+  if (!cached) return null;
+
+  const isExpired = Date.now() - cached.timestamp > CACHE_EXPIRY_MS;
+  const contentChanged = cached.contentHash !== contentHash;
+
+  if (isExpired || contentChanged) {
+    intelligentSuggestionsCache.delete(url);
+    return null;
+  }
+
+  console.log('🎯 Using cached intelligent suggestions for:', url);
+  return cached.suggestions;
+}
+
+/**
+ * Cache intelligent suggestions
+ */
+function cacheIntelligentSuggestions(
+  url: string,
+  title: string,
+  content: string,
+  suggestions: AgentSuggestion[]
+): void {
+  const contentHash = generateContentHash(url, title, content);
+  const urlHash = url.split('?')[0]; // Remove query params for grouping
+
+  intelligentSuggestionsCache.set(url, {
+    url,
+    urlHash,
+    suggestions,
+    timestamp: Date.now(),
+    pageTitle: title,
+    contentHash
+  });
+
+  console.log('💾 Cached intelligent suggestions for:', url);
+}
+
+/**
+ * Get intelligent suggestions using GPT-5-nano (with caching)
+ */
+export async function getIntelligentSuggestions(
+  url: string,
+  title: string,
+  content: string
+): Promise<AgentSuggestion[]> {
   try {
     if (!url) {
       return defaultSuggestions;
     }
+    // Check cache first
+    const cached = getCachedSuggestions(url, title, content);
+    if (cached) return cached;
 
-    console.log('🔍 AGENT SUGGESTIONS - URL:', url);
+    console.log('🤖 Generating intelligent suggestions for:', url);
+
+    // Create simplified prompt for GPT-5-nano
+    const analysisPrompt = `Analyze this webpage and suggest 3 relevant actions a user might want to take. Return ONLY a JSON array in this exact format:
+[
+  {
+    "icon": "📝",
+    "title": "Action title",
+    "description": "What this action does",
+    "prompt": "Detailed prompt for the AI assistant"
+  }
+]
+
+Website: ${url}
+Title: ${title}
+Content: ${content.substring(0, 800)}
+
+Make the suggestions specific to this page's content and domain. Examples:
+- For GitHub: "Review code quality", "Explain repository structure"  
+- For docs: "Create quick start guide", "Explain API endpoints"
+- For articles: "Summarize key points", "Extract action items"
+- For products: "Analyze features", "Compare alternatives"
+
+Return only the JSON array, no other text.`;
+
+    // Send request to background script
+    const response = await chrome.runtime.sendMessage({
+      type: 'ASK_INTELLA',
+      payload: {
+        question: analysisPrompt,
+        model: 'gpt-5-nano',
+        maxTokens: 500
+      }
+    });
+
+    if (!response.success) {
+      console.error('Failed to get intelligent suggestions:', response.error);
+      return getBasicSuggestions(url);
+    }
+
+    // Parse response
+    let suggestions: AgentSuggestion[];
+    try {
+      suggestions = JSON.parse(response.data);
+      if (!Array.isArray(suggestions) || suggestions.length === 0) {
+        throw new Error('Invalid response format');
+      }
+    } catch (parseError) {
+      console.error('Failed to parse intelligent suggestions:', parseError);
+      return getBasicSuggestions(url);
+    }
+
+    // Cache the results
+    cacheIntelligentSuggestions(url, title, content, suggestions);
+    return suggestions;
+
+  } catch (error) {
+    console.error('Error getting intelligent suggestions:', error);
+    return getBasicSuggestions(url);
+  }
+}
+
+/**
+ * Get basic (hardcoded) agent suggestions for a given URL
+ */
+export function getBasicSuggestions(url: string): AgentSuggestion[] {
+  try {
+    // Handle empty, undefined, or invalid URLs
+    if (!url || typeof url !== 'string' || url.trim() === '') {
+      console.log('⚠️ getBasicSuggestions: Invalid or empty URL:', url);
+      return defaultSuggestions;
+    }
+
     const urlObj = new URL(url);
     const domain = urlObj.hostname;
 
@@ -263,9 +419,51 @@ export function getAgentSuggestions(url: string): AgentSuggestion[] {
     // Return default suggestions if no pattern matches
     return defaultSuggestions;
   } catch (error) {
-    console.error('Error parsing URL for agent suggestions:', error);
+    console.error('Error parsing URL for basic suggestions:', error);
     return defaultSuggestions;
   }
+}
+
+/**
+ * Main function to get agent suggestions with mode support
+ */
+export async function getAgentSuggestions(
+  url: string,
+  mode: SuggestionMode = 'basic',
+  pageData?: { title: string; content: string }
+): Promise<AgentSuggestion[]> {
+  if (mode === 'basic') {
+    return getBasicSuggestions(url);
+  }
+
+  if (mode === 'intelligent' && pageData) {
+    return await getIntelligentSuggestions(url, pageData.title, pageData.content);
+  }
+
+  // Fallback to basic if intelligent mode requested but no page data
+  return getBasicSuggestions(url);
+}
+
+/**
+ * Clear cached suggestions (useful for testing or manual refresh)
+ */
+export function clearSuggestionsCache(url?: string): void {
+  if (url) {
+    intelligentSuggestionsCache.delete(url);
+  } else {
+    intelligentSuggestionsCache.clear();
+  }
+  console.log('🗑️ Cleared suggestions cache' + (url ? ` for ${url}` : ''));
+}
+
+/**
+ * Get cache stats for debugging
+ */
+export function getCacheStats(): { size: number; entries: string[] } {
+  return {
+    size: intelligentSuggestionsCache.size,
+    entries: Array.from(intelligentSuggestionsCache.keys())
+  };
 }
 
 /**

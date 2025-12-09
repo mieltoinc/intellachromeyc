@@ -12,11 +12,19 @@ export class DOMReader {
     const url = window.location.href;
     const title = document.title;
 
+    console.log('🔍 DOMReader: Starting content extraction for:', { url, title });
+
     // Extract meta description
     const metaDescription = document.querySelector('meta[name="description"]')?.getAttribute('content') || '';
+    console.log('📝 DOMReader: Meta description:', metaDescription);
 
     // Extract all text content (simplified - we'd want to use Readability.js in production)
     const content = this.extractMainContent();
+    console.log('📄 DOMReader: Main content extracted:', {
+      length: content.length,
+      preview: content.substring(0, 150),
+      isEmpty: content.trim().length === 0
+    });
 
     // Extract headings
     const headings = Array.from(document.querySelectorAll('h1, h2, h3')).map(h => h.textContent?.trim() || '');
@@ -38,7 +46,7 @@ export class DOMReader {
       keywords: this.getMetaContent('keywords') || '',
     };
 
-    return {
+    const result = {
       url,
       title,
       description: metaDescription,
@@ -48,6 +56,20 @@ export class DOMReader {
       images,
       metadata,
     };
+
+    console.log('✅ DOMReader: Final content analysis result:', {
+      url,
+      title,
+      descriptionLength: metaDescription.length,
+      contentLength: content.length,
+      headingsCount: headings.length,
+      linksCount: links.length,
+      imagesCount: images.length,
+      hasValidContent: content.trim().length > 50,
+      contentPreview: content.substring(0, 200)
+    });
+
+    return result;
   }
 
   /**
@@ -65,15 +87,28 @@ export class DOMReader {
       '.entry-content',
     ];
 
+    console.log('🔍 DOMReader: Trying content selectors...');
+    
     for (const selector of contentSelectors) {
       const element = document.querySelector(selector);
       if (element) {
-        return this.getTextContent(element);
+        const content = this.getTextContent(element);
+        console.log(`✅ DOMReader: Found content with selector "${selector}":`, {
+          length: content.length,
+          preview: content.substring(0, 100)
+        });
+        return content;
       }
     }
 
     // Fallback to body
-    return this.getTextContent(document.body);
+    console.log('⚠️ DOMReader: No specific content selector found, falling back to document.body');
+    const bodyContent = this.getTextContent(document.body);
+    console.log('📄 DOMReader: Body content extracted:', {
+      length: bodyContent.length,
+      preview: bodyContent.substring(0, 100)
+    });
+    return bodyContent;
   }
 
   /**
