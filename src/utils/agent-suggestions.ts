@@ -245,6 +245,9 @@ const defaultSuggestions: AgentSuggestion[] = [
  */
 export function getAgentSuggestions(url: string): AgentSuggestion[] {
   try {
+    if (!url) {
+      return defaultSuggestions;
+    }
 
     console.log('🔍 AGENT SUGGESTIONS - URL:', url);
     const urlObj = new URL(url);
