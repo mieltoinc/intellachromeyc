@@ -1160,6 +1160,31 @@ chrome.tabs.onUpdated.addListener(async (_tabId, changeInfo, tab) => {
 setInterval(updateBadge, 60000); // Every minute
 updateBadge(); // Initial update
 
+// Proactively refresh auth tokens to keep users logged in
+// Refresh every 50 minutes (tokens typically expire after 1 hour)
+async function refreshAuthToken() {
+  try {
+    const settings = await storage.getSettings();
+    // Only refresh if using token auth (not API key)
+    if (!settings.apiKey) {
+      const refreshed = await mieltoAuth.refreshToken();
+      if (refreshed) {
+        console.log('✅ Background token refresh successful');
+      } else {
+        console.log('ℹ️ Background token refresh skipped (no refresh token or using API key)');
+      }
+    }
+  } catch (error) {
+    console.warn('⚠️ Background token refresh failed:', error);
+  }
+}
+
+// Refresh token every 50 minutes (3000000 ms) to keep session alive
+// This ensures tokens are refreshed before they expire (typically 1 hour)
+setInterval(refreshAuthToken, 50 * 60 * 1000); // 50 minutes
+// Also refresh on startup
+refreshAuthToken();
+
 // Feature 5: Attach Tab enhancements handlers
 async function handleGetOpenTabs(): Promise<MessageResponse> {
   try {

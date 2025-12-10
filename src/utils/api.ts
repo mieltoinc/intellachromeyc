@@ -411,7 +411,7 @@ Focus on extracting the most important information that would be useful for futu
     const headers = await this.getUploadHeaders();
     
     // Get workspace ID
-    let workspaceId = this.workspace_id;
+    let workspaceId: string | undefined = this.workspace_id;
     if (!workspaceId) {
       const session = await mieltoAuth.getCurrentSession();
       workspaceId = session?.workspace?.id;

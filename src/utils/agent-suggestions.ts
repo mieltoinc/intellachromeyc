@@ -278,17 +278,17 @@ function generateContentHash(url: string, title: string, content: string): strin
 function getCachedSuggestions(url: string, title: string, content: string): AgentSuggestion[] | null {
   const contentHash = generateContentHash(url, title, content);
   const cached = intelligentSuggestionsCache.get(url);
-  
+
   if (!cached) return null;
-  
+
   const isExpired = Date.now() - cached.timestamp > CACHE_EXPIRY_MS;
   const contentChanged = cached.contentHash !== contentHash;
-  
+
   if (isExpired || contentChanged) {
     intelligentSuggestionsCache.delete(url);
     return null;
   }
-  
+
   console.log('🎯 Using cached intelligent suggestions for:', url);
   return cached.suggestions;
 }
@@ -297,14 +297,14 @@ function getCachedSuggestions(url: string, title: string, content: string): Agen
  * Cache intelligent suggestions
  */
 function cacheIntelligentSuggestions(
-  url: string, 
-  title: string, 
-  content: string, 
+  url: string,
+  title: string,
+  content: string,
   suggestions: AgentSuggestion[]
 ): void {
   const contentHash = generateContentHash(url, title, content);
   const urlHash = url.split('?')[0]; // Remove query params for grouping
-  
+
   intelligentSuggestionsCache.set(url, {
     url,
     urlHash,
@@ -313,7 +313,7 @@ function cacheIntelligentSuggestions(
     pageTitle: title,
     contentHash
   });
-  
+
   console.log('💾 Cached intelligent suggestions for:', url);
 }
 
@@ -326,6 +326,9 @@ export async function getIntelligentSuggestions(
   content: string
 ): Promise<AgentSuggestion[]> {
   try {
+    if (!url) {
+      return defaultSuggestions;
+    }
     // Check cache first
     const cached = getCachedSuggestions(url, title, content);
     if (cached) return cached;
@@ -425,18 +428,18 @@ export function getBasicSuggestions(url: string): AgentSuggestion[] {
  * Main function to get agent suggestions with mode support
  */
 export async function getAgentSuggestions(
-  url: string, 
+  url: string,
   mode: SuggestionMode = 'basic',
   pageData?: { title: string; content: string }
 ): Promise<AgentSuggestion[]> {
   if (mode === 'basic') {
     return getBasicSuggestions(url);
   }
-  
+
   if (mode === 'intelligent' && pageData) {
     return await getIntelligentSuggestions(url, pageData.title, pageData.content);
   }
-  
+
   // Fallback to basic if intelligent mode requested but no page data
   return getBasicSuggestions(url);
 }
