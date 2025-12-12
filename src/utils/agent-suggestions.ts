@@ -258,6 +258,72 @@ const intelligentSuggestionsCache = new Map<string, CachedSuggestions>();
 const CACHE_EXPIRY_MS = 30 * 60 * 1000;
 
 /**
+ * URL patterns that should use intelligent prompts
+ * These are specific content pages, not general feeds
+ */
+const intelligentPromptPatterns = [
+  // Twitter/X specific posts
+  /^https?:\/\/(twitter\.com|x\.com)\/[^\/]+\/status\/\d+/i,
+  
+  // Gmail specific emails (not just inbox view)
+  /^https?:\/\/mail\.google\.com\/mail\/u\/\d+\/#inbox\/[a-f0-9]+$/i,
+  
+  // LinkedIn specific posts
+  /^https?:\/\/www\.linkedin\.com\/posts\//i,
+  /^https?:\/\/www\.linkedin\.com\/feed\/update\/urn:li:activity:\d+/i,
+  
+  // Facebook specific posts
+  /^https?:\/\/(www\.)?facebook\.com\/[^\/]+\/posts\/\d+/i,
+  /^https?:\/\/(www\.)?facebook\.com\/photo\//i,
+  
+  // Reddit specific posts
+  /^https?:\/\/(www\.)?reddit\.com\/r\/[^\/]+\/comments\//i,
+  
+  // YouTube specific videos
+  /^https?:\/\/(www\.)?youtube\.com\/watch\?v=/i,
+  /^https?:\/\/youtu\.be\//i,
+  
+  // GitHub specific pages (repos, issues, PRs)
+  /^https?:\/\/github\.com\/[^\/]+\/[^\/]+\/(issues|pull|blob|tree|commit)/i,
+  
+  // News article pages (specific articles, not homepage feeds)
+  /^https?:\/\/(www\.)?(nytimes\.com)\/\d{4}\/\d{2}\/\d{2}\//i,
+  /^https?:\/\/(www\.)?(wsj\.com)\/articles\//i,
+  /^https?:\/\/(www\.)?(reuters\.com)\/[^\/]+\/[^\/]+\//i,
+  
+  // Documentation pages (specific docs, not landing pages)
+  /^https?:\/\/[^\/]*docs?[^\/]*\/[^\/]+\//i,
+  
+  // Stack Overflow specific questions
+  /^https?:\/\/stackoverflow\.com\/questions\/\d+/i,
+  
+  // Product pages on e-commerce sites
+  /^https?:\/\/(www\.)?amazon\.[^\/]+\/(dp|gp\/product)\/[A-Z0-9]+/i,
+  
+  // Medium articles
+  /^https?:\/\/[^\/]*medium\.com\/[^\/]+\/[^\/]+-[a-f0-9]+/i,
+  
+  // Substack articles
+  /^https?:\/\/[^\/]+\.substack\.com\/p\//i,
+];
+
+/**
+ * Check if a URL should use intelligent prompts based on pattern matching
+ */
+export function shouldUseIntelligentPrompts(url: string): boolean {
+  if (!url || typeof url !== 'string') {
+    return false;
+  }
+  
+  try {
+    return intelligentPromptPatterns.some(pattern => pattern.test(url));
+  } catch (error) {
+    console.error('Error checking intelligent prompt patterns:', error);
+    return false;
+  }
+}
+
+/**
  * Generate a hash for URL + content to detect significant page changes
  */
 function generateContentHash(url: string, title: string, content: string): string {
@@ -425,7 +491,40 @@ export function getBasicSuggestions(url: string): AgentSuggestion[] {
 }
 
 /**
- * Main function to get agent suggestions with mode support
+ * Main function to get suggestions - automatically determines if intelligent or basic should be used
+ */
+export async function getSuggestions(
+  url: string,
+  pageData?: { title: string; content: string },
+  forceMode?: SuggestionMode
+): Promise<AgentSuggestion[]> {
+  let useIntelligent = false;
+  
+  if (forceMode === 'basic') {
+    useIntelligent = false;
+  } else if (forceMode === 'intelligent') {
+    useIntelligent = true;
+  } else {
+    // Auto-determine based on URL patterns
+    useIntelligent = shouldUseIntelligentPrompts(url);
+  }
+  
+  if (useIntelligent && pageData?.title && pageData?.content) {
+    try {
+      console.log('🤖 Using intelligent suggestions for URL:', url);
+      return await getIntelligentSuggestions(url, pageData.title, pageData.content);
+    } catch (error) {
+      console.error('❌ Intelligent suggestions failed, falling back to basic:', error);
+      return getBasicSuggestions(url);
+    }
+  }
+  
+  console.log('📋 Using basic suggestions for URL:', url);
+  return getBasicSuggestions(url);
+}
+
+/**
+ * @deprecated Use getSuggestions instead
  */
 export async function getAgentSuggestions(
   url: string,
