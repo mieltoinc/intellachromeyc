@@ -15,6 +15,7 @@ import { ThemeToggle } from '@/components/ThemeToggle';
 import './popup.css';
 
 const PopupInner: React.FC = () => {
+  // Start with null (loading) - will be set quickly by fast auth check
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
   const [recentMemories, setRecentMemories] = useState<Memory[]>([]);
   const [settings, setSettings] = useState<UserSettings | null>(null);
@@ -22,10 +23,12 @@ const PopupInner: React.FC = () => {
   const [isAnalysisActive, setIsAnalysisActive] = useState(true);
 
   useEffect(() => {
+    // Do fast auth check immediately
     checkAuthAndLoadData();
   }, []);
 
   const checkAuthAndLoadData = async () => {
+    // This is fast - just checks storage, no API calls
     const authenticated = await mieltoAuth.isAuthenticated();
     setIsAuthenticated(authenticated);
     

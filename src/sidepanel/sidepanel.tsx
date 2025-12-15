@@ -24,7 +24,7 @@ import { getFirstActiveApiKey } from '@/handlers/apikey.handler';
 import { mieltoAuth } from '@/lib/auth';
 import { ThemeProvider } from '@/components/ThemeContext';
 import { ThemeToggle } from '@/components/ThemeToggle';
-import { getBasicSuggestions, getIntelligentSuggestions, type AgentSuggestion, type SuggestionMode } from '@/utils/agent-suggestions';
+import { getSuggestions, getBasicSuggestions, type AgentSuggestion, type SuggestionMode } from '@/utils/agent-suggestions';
 import '../styles/app.css';
 
 interface ToolExecution {
@@ -82,9 +82,10 @@ const SidePanelInner: React.FC = () => {
   const [isConnecting, setIsConnecting] = useState(false);
   const [isMicEnabled, setIsMicEnabled] = useState(false);
   const [isListening, setIsListening] = useState(false);
-  const [selectedModel, setSelectedModel] = useState<string>('gpt-4o');
+  const [selectedModel, setSelectedModel] = useState<string>('gpt-5-nano');
 
   // State tab variables (from popup)
+  // Start with null (loading) - will be set quickly by fast auth check
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
   const [recentMemories, setRecentMemories] = useState<Memory[]>([]);
   const [settings, setSettings] = useState<UserSettings | null>(null);
@@ -103,10 +104,11 @@ const SidePanelInner: React.FC = () => {
   const [faviconError, setFaviconError] = useState(false);
 
   // Agent mode suggestions
+  type SuggestionsStatus = 'idle' | 'loading' | 'loaded' | 'error';
   const [agentSuggestions, setAgentSuggestions] = useState<AgentSuggestion[]>([]);
-  const [suggestionMode, setSuggestionMode] = useState<SuggestionMode>('intelligent'); // Default to intelligent
+  const [suggestionMode, setSuggestionMode] = useState<SuggestionMode>('intelligent');
   const [suggestionsMinimized, setSuggestionsMinimized] = useState(false);
-  const [intelligentSuggestionsLoaded, setIntelligentSuggestionsLoaded] = useState(false);
+  const [suggestionsStatus, setSuggestionsStatus] = useState<SuggestionsStatus>('idle');
   const [expandedToolExecutions, setExpandedToolExecutions] = useState<Set<string>>(new Set());
 
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -501,25 +503,23 @@ const SidePanelInner: React.FC = () => {
           url: tab.url
         });
 
-        // Load basic suggestions immediately, then load intelligent ones
+        // Load suggestions using unified method
         if (tab.url) {
-          setAgentSuggestions(getBasicSuggestions(tab.url));
-          setIntelligentSuggestionsLoaded(false);
-          
-          // Auto-load intelligent suggestions after a short delay if we have the necessary data
-          setTimeout(async () => {
-            if (suggestionMode === 'intelligent' && tab.title && pageContent) {
-              try {
-                console.log('🚀 Auto-loading intelligent suggestions on page load');
-                const intelligentSuggestions = await getIntelligentSuggestions(tab.url!, tab.title, pageContent);
-                setAgentSuggestions(intelligentSuggestions);
-                setIntelligentSuggestionsLoaded(true);
-              } catch (error) {
-                console.error('❌ Failed to auto-load intelligent suggestions:', error);
-                // Keep basic suggestions as fallback
-              }
-            }
-          }, 100); // Small delay to let basic suggestions show first
+          // Reset suggestions status when page changes
+          setSuggestionsStatus('loading');
+          // Load appropriate suggestions immediately
+          getSuggestions(tab.url, {
+            title: tab.title || '',
+            content: pageContent
+          }, suggestionMode).then(suggestions => {
+            setAgentSuggestions(suggestions);
+            setSuggestionsStatus('loaded');
+          }).catch(error => {
+            console.error('❌ Failed to load suggestions:', error);
+            // Fallback to basic suggestions
+            setAgentSuggestions(getBasicSuggestions(tab.url!));
+            setSuggestionsStatus('error');
+          });
         }
       } else {
         console.log('⚠️ Could not get tab information, using fallback');
@@ -551,17 +551,28 @@ const SidePanelInner: React.FC = () => {
   };
 
 
-  const loadIntelligentSuggestionsOnDemand = async () => {
-    if (!intelligentSuggestionsLoaded && suggestionMode === 'intelligent' && currentPageInfo.url && currentPageInfo.content && currentPageInfo.title) {
-      setIntelligentSuggestionsLoaded(true);
-      try {
-        console.log('🚀 Loading intelligent suggestions on demand');
-        const intelligentSuggestions = await getIntelligentSuggestions(currentPageInfo.url, currentPageInfo.title, currentPageInfo.content);
-        setAgentSuggestions(intelligentSuggestions);
-      } catch (error) {
-        console.error('❌ Failed to load intelligent suggestions:', error);
-        // Keep basic suggestions as fallback
+  const loadSuggestionsOnDemand = async () => {
+    // Only load if not already loaded or if suggestions are empty
+    if (suggestionsStatus !== 'loaded' || agentSuggestions.length === 0) {
+      if (currentPageInfo.url) {
+        setSuggestionsStatus('loading');
+        try {
+          console.log('🚀 Loading suggestions on demand');
+          const suggestions = await getSuggestions(currentPageInfo.url, {
+            title: currentPageInfo.title || '',
+            content: currentPageInfo.content || ''
+          }, suggestionMode);
+          setAgentSuggestions(suggestions);
+          setSuggestionsStatus('loaded');
+        } catch (error) {
+          console.error('❌ Failed to load suggestions on demand:', error);
+          // Keep basic suggestions as fallback
+          setAgentSuggestions(getBasicSuggestions(currentPageInfo.url));
+          setSuggestionsStatus('error');
+        }
       }
+    } else {
+      console.log('📋 Suggestions already loaded, skipping reload');
     }
   };
 
@@ -1095,30 +1106,19 @@ const SidePanelInner: React.FC = () => {
       
       // Reload suggestions with the updated mode immediately
       if (currentPageInfo.url) {
-        console.log('🔄 Immediately reloading suggestions with mode:', newMode);
-        // Use the new mode directly instead of relying on state update
-        if (newMode === 'intelligent') {
-          // Load basic first as placeholder
+        console.log('🔄 Reloading suggestions with new mode:', newMode);
+        setSuggestionsStatus('loading'); // Reset status since mode changed
+        try {
+          const suggestions = await getSuggestions(currentPageInfo.url, {
+            title: currentPageInfo.title || '',
+            content: currentPageInfo.content || ''
+          }, newMode);
+          setAgentSuggestions(suggestions);
+          setSuggestionsStatus('loaded');
+        } catch (error) {
+          console.error('❌ Failed to reload suggestions after settings change:', error);
           setAgentSuggestions(getBasicSuggestions(currentPageInfo.url));
-          
-          // Try intelligent if we have content
-          if (currentPageInfo.content && currentPageInfo.title) {
-            try {
-              const intelligentSuggestions = await getIntelligentSuggestions(
-                currentPageInfo.url, 
-                currentPageInfo.title, 
-                currentPageInfo.content
-              );
-              console.log('✅ Settings reload - Intelligent suggestions loaded:', intelligentSuggestions);
-              setAgentSuggestions(intelligentSuggestions);
-            } catch (error) {
-              console.error('❌ Settings reload - Intelligent suggestions failed:', error);
-            }
-          } else {
-            console.log('⚠️ Settings reload - Missing content for intelligent suggestions');
-          }
-        } else {
-          setAgentSuggestions(getBasicSuggestions(currentPageInfo.url));
+          setSuggestionsStatus('error');
         }
       }
     }
@@ -1807,10 +1807,28 @@ const SidePanelInner: React.FC = () => {
             {agentSuggestions.length > 0 && (
               <div className="bg-white dark:bg-darkBg-primary">
                 {/* Header with minimize button */}
-                <div className="flex items-center justify-between px-4 py-2 bg-white dark:bg-darkBg-primary">
+                <div 
+                  className={`flex items-center justify-between px-4 py-2 bg-white dark:bg-darkBg-primary transition-colors ${
+                    suggestionsStatus === 'loading' 
+                      ? 'cursor-not-allowed opacity-60' 
+                      : 'cursor-pointer hover:bg-gray-50 dark:hover:bg-darkBg-tertiary'
+                  }`}
+                  onClick={async () => {
+                    if (suggestionsStatus === 'loading') return; // Disable clicks while loading
+                    if (suggestionsMinimized) {
+                      await loadSuggestionsOnDemand();
+                    }
+                    setSuggestionsMinimized(!suggestionsMinimized);
+                  }}
+                  title={
+                    suggestionsStatus === 'loading' 
+                      ? 'Loading suggestions...' 
+                      : suggestionsMinimized ? 'Expand suggestions' : 'Minimize suggestions'
+                  }
+                >
                   <div className="flex items-center gap-2">
                     <div className="text-sm font-medium text-gray-700 dark:text-darkText-primary">
-                      {suggestionMode === 'intelligent' ? 'Intelligent' : ''} Prompts for {currentPageInfo.url ? (() => {
+                      Context-Aware Prompts for {currentPageInfo.url ? (() => {
                         try {
                           return new URL(currentPageInfo.url).hostname.replace('www.', '');
                         } catch {
@@ -1822,18 +1840,15 @@ const SidePanelInner: React.FC = () => {
                       NEW
                     </span>
                   </div>
-                  <button
-                    onClick={async () => {
-                      if (suggestionsMinimized) {
-                        await loadIntelligentSuggestionsOnDemand();
-                      }
-                      setSuggestionsMinimized(!suggestionsMinimized);
-                    }}
-                    className="p-1 text-gray-500 dark:text-darkText-tertiary hover:text-gray-700 dark:hover:text-darkText-secondary transition-colors rounded"
-                    title={suggestionsMinimized ? 'Expand suggestions' : 'Minimize suggestions'}
-                  >
-                    {suggestionsMinimized ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-                  </button>
+                  <div className="p-1 text-gray-500 dark:text-darkText-tertiary">
+                    {suggestionsStatus === 'loading' ? (
+                      <Loader2 size={16} className="animate-spin" />
+                    ) : suggestionsMinimized ? (
+                      <ChevronUp size={16} />
+                    ) : (
+                      <ChevronDown size={16} />
+                    )}
+                  </div>
                 </div>
                 
                 {/* Suggestions content - collapsible with animation */}
@@ -1849,9 +1864,60 @@ const SidePanelInner: React.FC = () => {
                         >
                           <button
                             onClick={() => {
-                              setQuery(suggestion.prompt);
-                              // Auto-execute the prompt
-                              setTimeout(() => handleSendMessageWithTabs(), 100);
+                              // Directly trigger sending with the prompt without relying on state
+                              const handleDirectSend = async () => {
+                                if (!suggestion.prompt.trim() || isLoading) return;
+
+                                setIsLoading(true);
+                                
+                                // Create user message immediately
+                                const userMessage: ChatMessage = {
+                                  role: 'user',
+                                  content: suggestion.prompt,
+                                  timestamp: new Date(),
+                                };
+
+                                setChatMessages(prev => [...prev, userMessage]);
+                                setQuery(''); // Clear the input
+
+                                // Send to backend
+                                try {
+                                  const response = await chrome.runtime.sendMessage({
+                                    type: MessageType.ASK_INTELLA,
+                                    payload: {
+                                      question: suggestion.prompt,
+                                      model: selectedModel,
+                                      attachments: [],
+                                      contextTabs: attachedTabs.concat(
+                                        currentPageInfo.hasInfo && currentPageInfo.tabId !== undefined && currentPageInfo.url
+                                          ? [{
+                                              id: currentPageInfo.tabId,
+                                              title: currentPageInfo.title || 'Current Page',
+                                              url: currentPageInfo.url,
+                                              favIconUrl: currentPageInfo.favicon
+                                            }] 
+                                          : []
+                                      ),
+                                    }
+                                  });
+
+                                  if (response.success) {
+                                    const assistantMessage: ChatMessage = {
+                                      role: 'assistant', 
+                                      content: response.data,
+                                      timestamp: new Date(),
+                                      toolExecutions: (response as any).toolExecutions,
+                                    };
+                                    setChatMessages(prev => [...prev, assistantMessage]);
+                                  }
+                                } catch (error) {
+                                  console.error('Error sending suggestion:', error);
+                                } finally {
+                                  setIsLoading(false);
+                                }
+                              };
+                              
+                              handleDirectSend();
                             }}
                             className="w-full flex items-start gap-3 p-2 rounded-lg hover:bg-gray-50 dark:hover:bg-darkBg-tertiary transition text-left"
                           >
