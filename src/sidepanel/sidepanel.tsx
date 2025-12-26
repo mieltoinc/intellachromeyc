@@ -6,7 +6,7 @@
 import React, { useState, useEffect, useRef, useReducer } from 'react';
 import ReactDOM from 'react-dom/client';
 import { Search, BookOpen, Sparkles, Settings as SettingsIcon, RefreshCw, Plus, CheckCircle, AlertCircle, Loader2, Eye, EyeOff, Zap, Mic, MicOff, X, AtSign, PhoneOff, ChevronDown, ChevronUp, Edit3 } from 'lucide-react';
-import { MessageType, TabInfo } from '@/types/messages';
+import { MessageType, TabInfo, StreamChunkPayload, StreamErrorPayload } from '@/types/messages';
 import { Memory, UserSettings } from '@/types/memory';
 import { mieltoAPI } from '@/utils/api';
 import { QuickActionsPopover } from '@/components/QuickActionsPopover';
@@ -57,6 +57,12 @@ const SidePanelInner: React.FC = () => {
   const [memories, setMemories] = useState<Memory[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  
+  // Streaming state
+  const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
+  const [streamingContent, setStreamingContent] = useState<string>('');
+  const streamingRequestId = useRef<string | null>(null);
+  
   const [showUploadPopover, setShowUploadPopover] = useState(false);
   const [showChatMenu, setShowChatMenu] = useState(false);
   const [showConversationSwitcher, setShowConversationSwitcher] = useState(false);
@@ -145,6 +151,91 @@ const SidePanelInner: React.FC = () => {
       if (message.type === MessageType.CAPTURE_SCREEN_REGION) {
         console.log('📸 SidePanel: Received region capture', message.payload);
         await processRegionCapture(message.payload);
+      }
+
+      // Streaming message handlers
+      if (message.type === MessageType.STREAM_CHUNK) {
+        const payload = message.payload as StreamChunkPayload;
+        console.log('📨📨📨 CHUNK RECEIVED:', {
+          chunkLength: payload.chunk.length,
+          chunkPreview: payload.chunk,
+          payloadRequestId: payload.requestId,
+          currentRequestId: streamingRequestId.current,
+          streamingMessageId,
+          requestMatches: payload.requestId === streamingRequestId.current
+        });
+        
+        if (payload.requestId === streamingRequestId.current) {
+          console.log('✅ Request ID matches - processing chunk');
+          
+          // SIMPLE: Just append to streamingContent state - this will trigger re-render
+          setStreamingContent(prev => {
+            const newContent = prev + payload.chunk;
+            console.log('💬💬💬 Streaming content now:', newContent.length, 'chars');
+            console.log('💬💬💬 Full content preview:', newContent.substring(0, 100));
+            return newContent;
+          });
+        } else {
+          console.warn('⚠️⚠️⚠️ Received chunk for different request:', payload.requestId, 'vs', streamingRequestId.current);
+        }
+      }
+
+      // if (message.type === MessageType.STREAM_COMPLETE) {
+        // const payload = message.payload as StreamCompletePayload;
+        // if (payload.requestId === streamingRequestId.current) {
+        //   // Use fullResponse from payload if available, fallback to streamingContent
+        //   const finalContent = payload.fullResponse || streamingContent;
+        //   console.log('🏁 Stream complete - using final content:', finalContent.length, 'chars');
+          
+          // Create final assistant message
+          // const assistantMessage: ChatMessage = {
+          //   role: 'assistant',
+          //   content: finalContent,
+          //   timestamp: new Date(),
+          //   toolExecutions: payload.toolExecutions,
+          // };
+          
+          // Replace the streaming message with final message
+          // setChatMessages(prev => 
+          //   prev.map(msg => 
+          //     msg === prev.find(m => m.role === 'assistant' && streamingMessageId)
+          //       ? assistantMessage
+          //       : msg
+          //   )
+          // );
+          
+        //   // Reset streaming state
+        //   setStreamingMessageId(null);
+        //   setStreamingContent('');
+        //   streamingRequestId.current = null;
+        //   setIsLoading(false);
+          
+        //   // Clear attached tabs and staged images after successful streaming
+        //   console.log('🧹 STREAM COMPLETE - Clearing attached tabs and staged images');
+        //   setAttachedTabs([]);
+        //   setStagedImages([]);
+        // }
+      // }
+
+      if (message.type === MessageType.STREAM_ERROR) {
+        const payload = message.payload as StreamErrorPayload;
+        if (payload.requestId === streamingRequestId.current) {
+          console.error('❌ Stream error:', payload.error);
+          
+          // Add error message
+          const errorMessage: ChatMessage = {
+            role: 'assistant',
+            content: `Error: ${payload.error}`,
+            timestamp: new Date(),
+          };
+          setChatMessages(prev => [...prev, errorMessage]);
+          
+          // Reset streaming state
+          setStreamingMessageId(null);
+          setStreamingContent('');
+          streamingRequestId.current = null;
+          setIsLoading(false);
+        }
       }
     };
 
@@ -1538,27 +1629,38 @@ const SidePanelInner: React.FC = () => {
         }
       }
 
+      // Generate unique request ID for streaming
+      const requestId = `stream-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      streamingRequestId.current = requestId;
+      console.log('🚀 TEXT INPUT - Setting up streaming with requestId:', requestId);
+
+      // Create initial streaming message
+      const streamMessageId = `streaming-${Date.now()}`;
+      setStreamingMessageId(streamMessageId);
+      setStreamingContent('');
+      console.log('🎬 TEXT INPUT - Set streamingMessageId:', streamMessageId);
+
+      // Add placeholder streaming message  
+      const streamingMessage: ChatMessage = {
+        role: 'assistant',
+        content: '', // Will be updated via streaming
+        timestamp: new Date(),
+      };
+      setChatMessages(prev => [...prev, streamingMessage]);
+
+      // Send streaming request
       const response = await chrome.runtime.sendMessage({
-        type: MessageType.ASK_INTELLA,
+        type: MessageType.ASK_INTELLA_STREAM,
+        requestId,
         payload,
       });
 
-      if (response.success) {
-        const assistantMessage: ChatMessage = {
-          role: 'assistant',
-          content: response.data,
-          timestamp: new Date(),
-          toolExecutions: (response as any).toolExecutions,
-        };
-        setChatMessages(prev => [...prev, assistantMessage]);
-
-        // Clear attached tabs and staged images after successful message
-        console.log('🧹 Clearing attached tabs and staged images after successful message');
-        setAttachedTabs([]);
-        setStagedImages([]);
-      } else {
+      if (!response.success) {
         throw new Error(response.error);
       }
+
+      // Note: streaming completion will be handled by the STREAM_COMPLETE message listener
+      // Don't clear tabs/images here - wait for stream completion
     } catch (error) {
       console.error('💥 Chat error:', error);
 
@@ -1674,7 +1776,54 @@ const SidePanelInner: React.FC = () => {
                         {msg.role === 'user' ? (
                           <div className="text-sm leading-relaxed text-white">{msg.content}</div>
                         ) : (
-                          <MarkdownRenderer content={msg.content} className="text-sm" />
+                          <div className="text-sm">
+                            <MarkdownRenderer 
+                              content={
+                                // Show regular message content OR streaming content if this is the streaming message
+                                (() => {
+                                  // Debug the streaming condition
+                                  const isLastMessage = idx === chatMessages.length - 1;
+                                  const hasStreamingId = !!streamingMessageId;
+                                  const isAssistant = msg.role === 'assistant';
+                                  const isEmpty = msg.content === '';
+                                  const hasStreamingContent = streamingContent.length > 0;
+                                  
+                                  console.log('🔍 Streaming condition check:', {
+                                    idx,
+                                    totalMessages: chatMessages.length,
+                                    isLastMessage,
+                                    hasStreamingId,
+                                    streamingMessageId,
+                                    isAssistant,
+                                    isEmpty,
+                                    msgContentLength: msg.content.length,
+                                    hasStreamingContent,
+                                    streamingContentLength: streamingContent.length
+                                  });
+                                  
+                                  // If this is the last message AND we're streaming AND it's an empty assistant message
+                                  if (isLastMessage && hasStreamingId && isAssistant && isEmpty) {
+                                    console.log('🎬 Showing streaming content:', streamingContent.length, 'chars');
+                                    return streamingContent || 'Thinking...';
+                                  }
+                                  // Otherwise show regular message content  
+                                  console.log('💬 Showing regular message:', msg.content.length, 'chars');
+                                  return msg.content;
+                                })()
+                              } 
+                              className="text-sm" 
+                            />
+                            {/* Show typing indicator for streaming - when message is empty and no streaming content yet */}
+                            {idx === chatMessages.length - 1 && streamingMessageId && !streamingContent && (
+                              <div className="flex items-center gap-1 mt-1">
+                                <div className="flex space-x-1">
+                                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
+                                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{animationDelay: '0.1s'}}></div>
+                                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{animationDelay: '0.2s'}}></div>
+                                </div>
+                              </div>
+                            )}
+                          </div>
                         )}
                         {msg.toolExecutions && msg.toolExecutions.length > 0 && (() => {
                           const messageId = `${idx}-tools`;
@@ -1864,26 +2013,58 @@ const SidePanelInner: React.FC = () => {
                         >
                           <button
                             onClick={() => {
-                              // Directly trigger sending with the prompt without relying on state
-                              const handleDirectSend = async () => {
-                                if (!suggestion.prompt.trim() || isLoading) return;
+                              console.log('🔥🔥🔥 SUGGESTION CLICKED:', suggestion.title);
+                              console.log('🔥🔥🔥 SUGGESTION PROMPT:', suggestion.prompt);
+                              console.log('🔥🔥🔥 Current loading state:', isLoading);
+                              // Stream the suggestion prompt
+                              const handleStreamSend = async () => {
+                                if (!suggestion.prompt.trim() || isLoading) {
+                                  console.log('❌ Blocking send - prompt empty or loading:', {
+                                    promptTrimmed: suggestion.prompt.trim(),
+                                    isLoading
+                                  });
+                                  return;
+                                }
 
-                                setIsLoading(true);
-                                
+                                console.log('✅ Proceeding with suggestion send');
+
                                 // Create user message immediately
                                 const userMessage: ChatMessage = {
                                   role: 'user',
-                                  content: suggestion.prompt,
+                                  content: suggestion.title, // Show the title as user message
                                   timestamp: new Date(),
                                 };
 
                                 setChatMessages(prev => [...prev, userMessage]);
                                 setQuery(''); // Clear the input
 
-                                // Send to backend
+                                // Generate unique request ID for this stream
+                                const requestId = `stream-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+                                streamingRequestId.current = requestId;
+                                console.log('🚀🚀🚀 Setting up streaming with requestId:', requestId);
+
+                                // Create initial streaming message
+                                const streamMessageId = `streaming-${Date.now()}`;
+                                setStreamingMessageId(streamMessageId);
+                                setStreamingContent('');
+                                setIsLoading(true); // Set loading state for streaming
+                                
+                                console.log('🎬🎬🎬 Set streamingMessageId:', streamMessageId);
+                                console.log('📋📋📋 Current streamingRequestId:', streamingRequestId.current);
+
+                                // Add placeholder streaming message
+                                const streamingMessage: ChatMessage = {
+                                  role: 'assistant',
+                                  content: '', // Will be updated via streaming
+                                  timestamp: new Date(),
+                                };
+                                setChatMessages(prev => [...prev, streamingMessage]);
+
+                                // Send streaming request to backend
                                 try {
-                                  const response = await chrome.runtime.sendMessage({
-                                    type: MessageType.ASK_INTELLA,
+                                  await chrome.runtime.sendMessage({
+                                    type: MessageType.ASK_INTELLA_STREAM,
+                                    requestId,
                                     payload: {
                                       question: suggestion.prompt,
                                       model: selectedModel,
@@ -1900,33 +2081,32 @@ const SidePanelInner: React.FC = () => {
                                       ),
                                     }
                                   });
-
-                                  if (response.success) {
-                                    const assistantMessage: ChatMessage = {
-                                      role: 'assistant', 
-                                      content: response.data,
-                                      timestamp: new Date(),
-                                      toolExecutions: (response as any).toolExecutions,
-                                    };
-                                    setChatMessages(prev => [...prev, assistantMessage]);
-                                  }
                                 } catch (error) {
-                                  console.error('Error sending suggestion:', error);
-                                } finally {
+                                  console.error('Error starting stream:', error);
                                   setIsLoading(false);
+                                  setStreamingMessageId(null);
+                                  setStreamingContent('');
+                                  streamingRequestId.current = null;
                                 }
                               };
                               
-                              handleDirectSend();
+                              handleStreamSend().catch(error => {
+                                console.error('❌ Stream send failed:', error);
+                              });
                             }}
                             className="w-full flex items-start gap-3 p-2 rounded-lg hover:bg-gray-50 dark:hover:bg-darkBg-tertiary transition text-left"
                           >
-                            <div className="w-7 h-7 rounded-full bg-gray-100 dark:bg-darkBg-secondary flex items-center justify-center flex-shrink-0">
+                            <div className="w-6 h-6 flex items-center justify-center flex-shrink-0">
                               <span className="text-sm">{suggestion.icon}</span>
                             </div>
                             <div className="flex-1 min-w-0">
-                              <div className="text-sm font-medium text-gray-900 dark:text-darkText-primary mb-0.5">{suggestion.title}</div>
-                              <div className="text-xs text-gray-500 dark:text-darkText-tertiary line-clamp-2">{suggestion.description}</div>
+                              <div className="text-sm text-gray-900 dark:text-darkText-primary truncate">
+                                <span className="font-medium">{suggestion.title}</span>
+                                {/* <span className="text-gray-500 dark:text-darkText-tertiary ml-2">• {suggestion.description}</span> */}
+                                {suggestion.responseLimit && (
+                                  <span className="text-blue-600 dark:text-blue-400 ml-2 text-xs">({suggestion.responseLimit})</span>
+                                )}
+                              </div>
                             </div>
                           </button>
                           {/* Pen icon for editing */}

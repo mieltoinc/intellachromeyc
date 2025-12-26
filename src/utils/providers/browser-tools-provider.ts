@@ -165,6 +165,157 @@ export class BrowserToolsProvider implements ToolProvider {
       enabled: true,
       providerId: this.id,
     });
+
+    // Tab Groups Management Tools
+    this.tools.set('create_tab_group', {
+      id: 'create_tab_group',
+      name: 'create_tab_group',
+      description: 'Create a new tab group and optionally add tabs to it',
+      parameters: {
+        type: 'object',
+        properties: {
+          tabIds: {
+            type: 'array',
+            items: { type: 'number' },
+            description: 'Array of tab IDs to add to the group. If not provided, creates an empty group.',
+          },
+          title: {
+            type: 'string',
+            description: 'Title for the tab group (optional)',
+          },
+          color: {
+            type: 'string',
+            enum: ['grey', 'blue', 'red', 'yellow', 'green', 'pink', 'purple', 'cyan'],
+            description: 'Color for the tab group (optional, defaults to grey)',
+          },
+        },
+        required: [],
+      },
+      enabled: true,
+      providerId: this.id,
+    });
+
+    this.tools.set('add_tabs_to_group', {
+      id: 'add_tabs_to_group',
+      name: 'add_tabs_to_group',
+      description: 'Add tabs to an existing tab group',
+      parameters: {
+        type: 'object',
+        properties: {
+          groupId: {
+            type: 'number',
+            description: 'ID of the tab group to add tabs to',
+          },
+          tabIds: {
+            type: 'array',
+            items: { type: 'number' },
+            description: 'Array of tab IDs to add to the group',
+          },
+        },
+        required: ['groupId', 'tabIds'],
+      },
+      enabled: true,
+      providerId: this.id,
+    });
+
+    this.tools.set('remove_tabs_from_group', {
+      id: 'remove_tabs_from_group',
+      name: 'remove_tabs_from_group',
+      description: 'Remove tabs from their current group (ungroup them)',
+      parameters: {
+        type: 'object',
+        properties: {
+          tabIds: {
+            type: 'array',
+            items: { type: 'number' },
+            description: 'Array of tab IDs to remove from their groups',
+          },
+        },
+        required: ['tabIds'],
+      },
+      enabled: true,
+      providerId: this.id,
+    });
+
+    this.tools.set('update_tab_group', {
+      id: 'update_tab_group',
+      name: 'update_tab_group',
+      description: 'Update tab group properties like title, color, or collapsed state',
+      parameters: {
+        type: 'object',
+        properties: {
+          groupId: {
+            type: 'number',
+            description: 'ID of the tab group to update',
+          },
+          title: {
+            type: 'string',
+            description: 'New title for the tab group (optional)',
+          },
+          color: {
+            type: 'string',
+            enum: ['grey', 'blue', 'red', 'yellow', 'green', 'pink', 'purple', 'cyan'],
+            description: 'New color for the tab group (optional)',
+          },
+          collapsed: {
+            type: 'boolean',
+            description: 'Whether to collapse or expand the tab group (optional)',
+          },
+        },
+        required: ['groupId'],
+      },
+      enabled: true,
+      providerId: this.id,
+    });
+
+    this.tools.set('get_tab_groups', {
+      id: 'get_tab_groups',
+      name: 'get_tab_groups',
+      description: 'Get information about all tab groups in the current window',
+      parameters: {
+        type: 'object',
+        properties: {},
+        required: [],
+      },
+      enabled: true,
+      providerId: this.id,
+    });
+
+    this.tools.set('get_tabs_in_window', {
+      id: 'get_tabs_in_window',
+      name: 'get_tabs_in_window',
+      description: 'Get information about all tabs in the current window, including their group status',
+      parameters: {
+        type: 'object',
+        properties: {
+          includeGroupInfo: {
+            type: 'boolean',
+            description: 'Whether to include group information for each tab (default: true)',
+          },
+        },
+        required: [],
+      },
+      enabled: true,
+      providerId: this.id,
+    });
+
+    this.tools.set('organize_tabs_by_domain', {
+      id: 'organize_tabs_by_domain',
+      name: 'organize_tabs_by_domain',
+      description: 'Automatically organize tabs into groups by their domain/website',
+      parameters: {
+        type: 'object',
+        properties: {
+          minTabsPerGroup: {
+            type: 'number',
+            description: 'Minimum number of tabs required to create a group for a domain (default: 2)',
+          },
+        },
+        required: [],
+      },
+      enabled: true,
+      providerId: this.id,
+    });
   }
 
   getZodSchemas(): Map<string, { description: string; schema: any; outputSchema?: any }> {
@@ -219,6 +370,60 @@ export class BrowserToolsProvider implements ToolProvider {
       schema: z.object({}),
       outputSchema: z.object({
         screenshot: z.string().describe('Data URL of the captured screenshot in format: data:image/png;base64,<base64-encoded-image-data>'),
+      }),
+    });
+
+    // Tab Groups Management Schemas
+    schemas.set('create_tab_group', {
+      description: 'Create a new tab group and optionally add tabs to it',
+      schema: z.object({
+        tabIds: z.array(z.number()).optional().describe('Array of tab IDs to add to the group. If not provided, creates an empty group.'),
+        title: z.string().optional().describe('Title for the tab group (optional)'),
+        color: z.enum(['grey', 'blue', 'red', 'yellow', 'green', 'pink', 'purple', 'cyan']).optional().describe('Color for the tab group (optional, defaults to grey)'),
+      }),
+    });
+
+    schemas.set('add_tabs_to_group', {
+      description: 'Add tabs to an existing tab group',
+      schema: z.object({
+        groupId: z.number().describe('ID of the tab group to add tabs to'),
+        tabIds: z.array(z.number()).describe('Array of tab IDs to add to the group'),
+      }),
+    });
+
+    schemas.set('remove_tabs_from_group', {
+      description: 'Remove tabs from their current group (ungroup them)',
+      schema: z.object({
+        tabIds: z.array(z.number()).describe('Array of tab IDs to remove from their groups'),
+      }),
+    });
+
+    schemas.set('update_tab_group', {
+      description: 'Update tab group properties like title, color, or collapsed state',
+      schema: z.object({
+        groupId: z.number().describe('ID of the tab group to update'),
+        title: z.string().optional().describe('New title for the tab group (optional)'),
+        color: z.enum(['grey', 'blue', 'red', 'yellow', 'green', 'pink', 'purple', 'cyan']).optional().describe('New color for the tab group (optional)'),
+        collapsed: z.boolean().optional().describe('Whether to collapse or expand the tab group (optional)'),
+      }),
+    });
+
+    schemas.set('get_tab_groups', {
+      description: 'Get information about all tab groups in the current window',
+      schema: z.object({}),
+    });
+
+    schemas.set('get_tabs_in_window', {
+      description: 'Get information about all tabs in the current window, including their group status',
+      schema: z.object({
+        includeGroupInfo: z.boolean().optional().describe('Whether to include group information for each tab (default: true)'),
+      }),
+    });
+
+    schemas.set('organize_tabs_by_domain', {
+      description: 'Automatically organize tabs into groups by their domain/website',
+      schema: z.object({
+        minTabsPerGroup: z.number().optional().describe('Minimum number of tabs required to create a group for a domain (default: 2)'),
       }),
     });
     
@@ -377,6 +582,246 @@ export class BrowserToolsProvider implements ToolProvider {
             return {
               success: false,
               error: error.message || 'Failed to capture screenshot',
+            };
+          }
+        }
+
+        // Tab Groups Management Cases
+        case 'create_tab_group': {
+          try {
+            const { tabIds = [], title, color = 'grey' } = args;
+            
+            // Create the group - chrome.tabGroups.group takes just tab IDs
+            let groupId: number;
+            if (tabIds.length > 0) {
+              groupId = await chrome.tabs.group({ tabIds });
+            } else {
+              // Create with current tab if no tabs specified
+              const currentTabs = await chrome.tabs.query({ active: true, currentWindow: true });
+              if (currentTabs[0]?.id) {
+                groupId = await chrome.tabs.group({ tabIds: [currentTabs[0].id] });
+              } else {
+                throw new Error('No tabs available to create group');
+              }
+            }
+            
+            // Update group properties if specified
+            const updateProperties: chrome.tabGroups.UpdateProperties = {};
+            if (title) updateProperties.title = title;
+            if (color) updateProperties.color = color as chrome.tabGroups.ColorEnum;
+            
+            if (Object.keys(updateProperties).length > 0) {
+              await chrome.tabGroups.update(groupId, updateProperties);
+            }
+            
+            const group = await chrome.tabGroups.get(groupId);
+            return {
+              success: true,
+              result: {
+                groupId: group.id,
+                title: group.title,
+                color: group.color,
+                collapsed: group.collapsed,
+                windowId: group.windowId,
+              },
+            };
+          } catch (error: any) {
+            return {
+              success: false,
+              error: error.message || 'Failed to create tab group',
+            };
+          }
+        }
+
+        case 'add_tabs_to_group': {
+          try {
+            const { groupId, tabIds } = args;
+            await chrome.tabs.group({ tabIds, groupId });
+            
+            const group = await chrome.tabGroups.get(groupId);
+            return {
+              success: true,
+              result: {
+                groupId: group.id,
+                title: group.title,
+                color: group.color,
+                addedTabsCount: tabIds.length,
+              },
+            };
+          } catch (error: any) {
+            return {
+              success: false,
+              error: error.message || 'Failed to add tabs to group',
+            };
+          }
+        }
+
+        case 'remove_tabs_from_group': {
+          try {
+            const { tabIds } = args;
+            await chrome.tabs.ungroup(tabIds);
+            
+            return {
+              success: true,
+              result: {
+                ungroupedTabsCount: tabIds.length,
+                message: `Successfully removed ${tabIds.length} tab(s) from their groups`,
+              },
+            };
+          } catch (error: any) {
+            return {
+              success: false,
+              error: error.message || 'Failed to remove tabs from group',
+            };
+          }
+        }
+
+        case 'update_tab_group': {
+          try {
+            const { groupId, title, color, collapsed } = args;
+            
+            const updateProperties: chrome.tabGroups.UpdateProperties = {};
+            if (title !== undefined) updateProperties.title = title;
+            if (color !== undefined) updateProperties.color = color as chrome.tabGroups.ColorEnum;
+            if (collapsed !== undefined) updateProperties.collapsed = collapsed;
+            
+            const group = await chrome.tabGroups.update(groupId, updateProperties);
+            return {
+              success: true,
+              result: {
+                groupId: group.id,
+                title: group.title,
+                color: group.color,
+                collapsed: group.collapsed,
+                windowId: group.windowId,
+              },
+            };
+          } catch (error: any) {
+            return {
+              success: false,
+              error: error.message || 'Failed to update tab group',
+            };
+          }
+        }
+
+        case 'get_tab_groups': {
+          try {
+            const currentWindow = await chrome.windows.getCurrent();
+            const groups = await chrome.tabGroups.query({ windowId: currentWindow.id });
+            
+            return {
+              success: true,
+              result: {
+                groups: groups.map(group => ({
+                  id: group.id,
+                  title: group.title,
+                  color: group.color,
+                  collapsed: group.collapsed,
+                  windowId: group.windowId,
+                })),
+              },
+            };
+          } catch (error: any) {
+            return {
+              success: false,
+              error: error.message || 'Failed to get tab groups',
+            };
+          }
+        }
+
+        case 'get_tabs_in_window': {
+          try {
+            const { includeGroupInfo = true } = args;
+            const currentWindow = await chrome.windows.getCurrent();
+            const tabs = await chrome.tabs.query({ windowId: currentWindow.id });
+            
+            const result = tabs.map(tab => ({
+              id: tab.id,
+              title: tab.title,
+              url: tab.url,
+              active: tab.active,
+              pinned: tab.pinned,
+              groupId: includeGroupInfo ? (tab.groupId !== chrome.tabGroups.TAB_GROUP_ID_NONE ? tab.groupId : null) : undefined,
+              index: tab.index,
+            }));
+            
+            return {
+              success: true,
+              result: { tabs: result },
+            };
+          } catch (error: any) {
+            return {
+              success: false,
+              error: error.message || 'Failed to get tabs in window',
+            };
+          }
+        }
+
+        case 'organize_tabs_by_domain': {
+          try {
+            const { minTabsPerGroup = 2 } = args;
+            const currentWindow = await chrome.windows.getCurrent();
+            const tabs = await chrome.tabs.query({ windowId: currentWindow.id });
+            
+            // Group tabs by domain
+            const domainGroups: Record<string, chrome.tabs.Tab[]> = {};
+            
+            for (const tab of tabs) {
+              if (!tab.url || !tab.id) continue;
+              
+              try {
+                const url = new URL(tab.url);
+                const domain = url.hostname.replace(/^www\./, '');
+                
+                if (!domainGroups[domain]) {
+                  domainGroups[domain] = [];
+                }
+                domainGroups[domain].push(tab);
+              } catch (e) {
+                // Skip invalid URLs
+                continue;
+              }
+            }
+            
+            // Create groups for domains with enough tabs
+            const createdGroups = [];
+            const colors: chrome.tabGroups.ColorEnum[] = ['blue', 'red', 'yellow', 'green', 'pink', 'purple', 'cyan'];
+            let colorIndex = 0;
+            
+            for (const [domain, domainTabs] of Object.entries(domainGroups)) {
+              if (domainTabs.length >= minTabsPerGroup) {
+                const tabIds = domainTabs.map(tab => tab.id!).filter(Boolean);
+                
+                if (tabIds.length > 0) {
+                  const groupId = await chrome.tabs.group({ tabIds });
+                  await chrome.tabGroups.update(groupId, {
+                    title: domain,
+                    color: colors[colorIndex % colors.length],
+                  });
+                  
+                  createdGroups.push({
+                    domain,
+                    groupId,
+                    tabCount: tabIds.length,
+                  });
+                  
+                  colorIndex++;
+                }
+              }
+            }
+            
+            return {
+              success: true,
+              result: {
+                createdGroups,
+                totalDomainsProcessed: Object.keys(domainGroups).length,
+                groupsCreated: createdGroups.length,
+              },
+            };
+          } catch (error: any) {
+            return {
+              success: false,
+              error: error.message || 'Failed to organize tabs by domain',
             };
           }
         }

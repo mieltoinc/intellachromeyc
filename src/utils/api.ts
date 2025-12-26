@@ -830,6 +830,129 @@ This content should be indexed and made searchable for future queries. Please ac
   }
 
   /**
+   * Ask Intella with streaming response
+   */
+  async *askIntellaStream(
+    question: string,
+    context?: string,
+    model?: string,
+    conversationHistory?: Array<{ role: 'user' | 'assistant'; content: string }>
+  ): AsyncIterableIterator<string> {
+    await handler.initialize();
+    
+    // Build messages array with conversation history
+    const systemPrompt = `You are Intella, an advanced AI assistant designed to help with web browsing, research, and productivity tasks. You have access to the user's memories and browsing context to provide personalized assistance.
+
+Core Capabilities:
+- Web browsing assistance and page analysis
+- Memory-based contextual responses using user's browsing history
+- Research and information synthesis
+- Task automation and productivity support
+
+Context Guidelines:
+- Use provided context and memories to give relevant, personalized responses
+- Be conversational but focused and helpful
+- When referencing memories or context, explain how they relate to the current question
+- If context is limited, still provide the best possible assistance
+
+${context ? `Current Context: ${context}` : ''}`;
+
+    const messages = [
+      {
+        role: 'system' as const,
+        content: systemPrompt,
+      },
+      ...(conversationHistory || []),
+      {
+        role: 'user' as const,
+        content: question,
+      },
+    ];
+
+    const formattedModel = this.formatModelId(model || 'gpt-4o');
+    
+    // Use streaming version
+    console.log('🚀 Starting stream request with messages:', messages.length, 'model:', formattedModel);
+    const stream = await handler.streamChat(messages, {
+      model: formattedModel,
+    });
+
+    let chunkCount = 0;
+    console.log('📡 Beginning to iterate stream...');
+    for await (const chunk of stream) {
+      chunkCount++;
+      console.log(`📦 API chunk #${chunkCount}:`, chunk);
+      yield chunk;
+    }
+    console.log(`🏁 Stream complete. Total chunks yielded: ${chunkCount}`);
+  }
+
+  /**
+   * Ask Intella with screenshot and streaming response
+   */
+  async *askIntellaWithScreenshotStream(
+    question: string,
+    screenshot: string,
+    context?: string,
+    model?: string,
+    conversationHistory?: Array<{ role: 'user' | 'assistant'; content: string }>
+  ): AsyncIterableIterator<string> {
+    await handler.initialize();
+    
+    // Build system prompt
+    const systemPrompt = `You are Intella, an advanced AI assistant designed to help with web browsing, research, and productivity tasks. You have access to the user's memories and browsing context to provide personalized assistance.
+
+Core Capabilities:
+- Web browsing assistance and page analysis
+- Memory-based contextual responses using user's browsing history
+- Research and information synthesis
+- Task automation and productivity support
+- Visual analysis of screenshots and images
+
+Context Guidelines:
+- Use provided context and memories to give relevant, personalized responses
+- Be conversational but focused and helpful
+- When referencing memories or context, explain how they relate to the current question
+- Analyze screenshots carefully to understand what the user is seeing
+- If context is limited, still provide the best possible assistance
+
+${context ? `Current Context: ${context}` : ''}`;
+    
+    // Build messages array with conversation history and multimodal content
+    const messages = [
+      {
+        role: 'system' as const,
+        content: systemPrompt,
+      },
+      ...(conversationHistory || []),
+      {
+        role: 'user' as const,
+        content: [
+          {
+            type: 'text' as const,
+            text: question,
+          },
+          {
+            type: 'image' as const,
+            image: screenshot,
+          }
+        ]
+      },
+    ];
+
+    const formattedModel = this.formatModelId(model || 'gpt-4o');
+    
+    // Use streaming version  
+    const stream = await handler.streamChat(messages, {
+      model: formattedModel,
+    });
+
+    for await (const chunk of stream) {
+      yield chunk;
+    }
+  }
+
+  /**
    * Improve/rewrite text
    */
   async improveText(text: string, instruction: string): Promise<string> {

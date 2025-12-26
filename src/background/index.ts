@@ -258,6 +258,9 @@ async function handleMessage(message: Message, _sender: chrome.runtime.MessageSe
       case MessageType.ASK_INTELLA:
         return await handleAskIntella(message.payload);
 
+      case MessageType.ASK_INTELLA_STREAM:
+        return await handleAskIntellaStream(message.payload, message.requestId || '', _sender);
+
       case MessageType.IMPROVE_TEXT:
         return await handleImproveText(message.payload);
 
@@ -726,6 +729,157 @@ async function handleAskIntella(payload: {
     };
   } catch (error: any) {
     console.error('Background: ASK_INTELLA error:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+async function handleAskIntellaStream(
+  payload: { 
+    question: string; 
+    context?: string; 
+    screenshot?: string; 
+    model?: string;
+    conversationHistory?: Array<{ role: 'user' | 'assistant'; content: string }>;
+  }, 
+  requestId: string,
+  _sender: chrome.runtime.MessageSender
+): Promise<MessageResponse> {
+  try {
+    // Ensure tool providers are initialized
+    try {
+      const providers = toolRegistry.getAllProviders();
+      if (providers.length === 0) {
+        console.log('🔧 Tool providers not initialized, registering...');
+        await toolRegistry.registerProvider(new MemoryToolsProvider());
+        await toolRegistry.registerProvider(new BrowserToolsProvider());
+        console.log('✅ Tool providers initialized');
+      }
+    } catch (error) {
+      console.error('Failed to register tool providers:', error);
+    }
+
+    // Get memories using Moss semantic search
+    console.log('🔍 Searching for relevant memories...');
+    const relevantMemories = await mossClient.searchMemories(payload.question, 5);
+
+    // Combine original context with memory context
+    let combinedContext = payload.context || '';
+    if (relevantMemories.length > 0) {
+      const memoryContext = relevantMemories.map((memory: any) => 
+        `Memory from ${memory.source || memory.url || 'unknown'}: ${memory.summary || memory.content || 'No content'}`
+      ).join('\n\n');
+      combinedContext = combinedContext ? `${combinedContext}\n\nRelevant memories:\n${memoryContext}` : memoryContext;
+    }
+
+    const streamId = `stream-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+    // Use streaming version of mieltoAPI
+    if (payload.screenshot) {
+      console.log('📸 Using screenshot for streaming analysis');
+      try {
+        const stream = mieltoAPI.askIntellaWithScreenshotStream(
+          payload.question,
+          payload.screenshot,
+          combinedContext,
+          payload.model,
+          payload.conversationHistory
+        );
+
+        let fullResponse = '';
+        let chunkCount = 0;
+        for await (const chunk of stream) {
+          chunkCount++;
+          fullResponse += chunk;
+          console.log(`📦 Sending chunk #${chunkCount} to sidepanel:`, chunk);
+          // Send chunk to sidepanel
+          chrome.runtime.sendMessage({
+            type: MessageType.STREAM_CHUNK,
+            payload: {
+              requestId,
+              chunk,
+              messageId: streamId
+            }
+          }).catch(() => {}); // Ignore errors if sidepanel is closed
+        }
+        console.log(`🏁 Streaming complete. Total chunks: ${chunkCount}, full response length: ${fullResponse.length}`);
+
+        // Send completion to sidepanel with full response
+        chrome.runtime.sendMessage({
+          type: MessageType.STREAM_COMPLETE,
+          payload: {
+            requestId,
+            messageId: streamId,
+            fullResponse,
+            toolExecutions: [] // TODO: Add tool executions support for streaming
+          }
+        }).catch(() => {}); // Ignore errors if sidepanel is closed
+
+      } catch (streamError) {
+        // Send error to sidepanel
+        chrome.runtime.sendMessage({
+          type: MessageType.STREAM_ERROR,
+          payload: {
+            requestId,
+            messageId: streamId,
+            error: streamError instanceof Error ? streamError.message : 'Streaming failed'
+          }
+        }).catch(() => {}); // Ignore errors if sidepanel is closed
+      }
+    } else {
+      console.log('💭 Using text for streaming analysis');
+      try {
+        const stream = mieltoAPI.askIntellaStream(
+          payload.question,
+          combinedContext,
+          payload.model,
+          payload.conversationHistory
+        );
+
+        let fullResponse = '';
+        let chunkCount = 0;
+        for await (const chunk of stream) {
+          chunkCount++;
+          fullResponse += chunk;
+          console.log(`📦 Sending chunk #${chunkCount} to sidepanel:`, chunk);
+          // Send chunk to sidepanel
+          chrome.runtime.sendMessage({
+            type: MessageType.STREAM_CHUNK,
+            payload: {
+              requestId,
+              chunk,
+              messageId: streamId
+            }
+          }).catch(() => {}); // Ignore errors if sidepanel is closed
+        }
+        console.log(`🏁 Streaming complete. Total chunks: ${chunkCount}, full response length: ${fullResponse.length}`);
+
+        // Send completion to sidepanel with full response
+        chrome.runtime.sendMessage({
+          type: MessageType.STREAM_COMPLETE,
+          payload: {
+            requestId,
+            messageId: streamId,
+            fullResponse,
+            toolExecutions: [] // TODO: Add tool executions support for streaming
+          }
+        }).catch(() => {}); // Ignore errors if sidepanel is closed
+
+      } catch (streamError) {
+        // Send error to sidepanel
+        chrome.runtime.sendMessage({
+          type: MessageType.STREAM_ERROR,
+          payload: {
+            requestId,
+            messageId: streamId,
+            error: streamError instanceof Error ? streamError.message : 'Streaming failed'
+          }
+        }).catch(() => {}); // Ignore errors if sidepanel is closed
+      }
+    }
+
+    return { success: true, data: 'Stream started' };
+  } catch (error: any) {
+    console.error('Background: ASK_INTELLA_STREAM error:', error);
     return { success: false, error: error.message };
   }
 }
