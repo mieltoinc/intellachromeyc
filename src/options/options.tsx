@@ -45,6 +45,7 @@ const OptionsInner: React.FC = () => {
   const { theme, setTheme } = useTheme();
   
   // Authentication state
+  // Start with null (loading) - will be set quickly by fast auth check
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
   
   const [activeTab, setActiveTab] = useState<'memories' | 'chat' | 'settings' | 'tools' | 'privacy'>('memories');

@@ -6,7 +6,7 @@
 import React, { useState, useEffect, useRef, useReducer } from 'react';
 import ReactDOM from 'react-dom/client';
 import { Search, BookOpen, Sparkles, Settings as SettingsIcon, RefreshCw, Plus, CheckCircle, AlertCircle, Loader2, Eye, EyeOff, Zap, Mic, MicOff, X, AtSign, PhoneOff, ChevronDown, ChevronUp, Edit3 } from 'lucide-react';
-import { MessageType, TabInfo } from '@/types/messages';
+import { MessageType, TabInfo, StreamChunkPayload, StreamCompletePayload, StreamErrorPayload } from '@/types/messages';
 import { Memory, UserSettings } from '@/types/memory';
 import { mieltoAPI } from '@/utils/api';
 import { QuickActionsPopover } from '@/components/QuickActionsPopover';
@@ -24,7 +24,7 @@ import { getFirstActiveApiKey } from '@/handlers/apikey.handler';
 import { mieltoAuth } from '@/lib/auth';
 import { ThemeProvider } from '@/components/ThemeContext';
 import { ThemeToggle } from '@/components/ThemeToggle';
-import { getBasicSuggestions, getIntelligentSuggestions, type AgentSuggestion, type SuggestionMode } from '@/utils/agent-suggestions';
+import { getSuggestions, getBasicSuggestions, type AgentSuggestion, type SuggestionMode } from '@/utils/agent-suggestions';
 import '../styles/app.css';
 
 interface ToolExecution {
@@ -57,6 +57,12 @@ const SidePanelInner: React.FC = () => {
   const [memories, setMemories] = useState<Memory[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  
+  // Streaming state
+  const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
+  const [streamingContent, setStreamingContent] = useState<string>('');
+  const streamingRequestId = useRef<string | null>(null);
+  
   const [showUploadPopover, setShowUploadPopover] = useState(false);
   const [showChatMenu, setShowChatMenu] = useState(false);
   const [showConversationSwitcher, setShowConversationSwitcher] = useState(false);
@@ -82,9 +88,10 @@ const SidePanelInner: React.FC = () => {
   const [isConnecting, setIsConnecting] = useState(false);
   const [isMicEnabled, setIsMicEnabled] = useState(false);
   const [isListening, setIsListening] = useState(false);
-  const [selectedModel, setSelectedModel] = useState<string>('gpt-4o');
+  const [selectedModel, setSelectedModel] = useState<string>('gpt-5-nano');
 
   // State tab variables (from popup)
+  // Start with null (loading) - will be set quickly by fast auth check
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
   const [recentMemories, setRecentMemories] = useState<Memory[]>([]);
   const [settings, setSettings] = useState<UserSettings | null>(null);
@@ -103,10 +110,11 @@ const SidePanelInner: React.FC = () => {
   const [faviconError, setFaviconError] = useState(false);
 
   // Agent mode suggestions
+  type SuggestionsStatus = 'idle' | 'loading' | 'loaded' | 'error';
   const [agentSuggestions, setAgentSuggestions] = useState<AgentSuggestion[]>([]);
-  const [suggestionMode, setSuggestionMode] = useState<SuggestionMode>('intelligent'); // Default to intelligent
+  const [suggestionMode, setSuggestionMode] = useState<SuggestionMode>('intelligent');
   const [suggestionsMinimized, setSuggestionsMinimized] = useState(false);
-  const [intelligentSuggestionsLoaded, setIntelligentSuggestionsLoaded] = useState(false);
+  const [suggestionsStatus, setSuggestionsStatus] = useState<SuggestionsStatus>('idle');
   const [expandedToolExecutions, setExpandedToolExecutions] = useState<Set<string>>(new Set());
 
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -143,6 +151,113 @@ const SidePanelInner: React.FC = () => {
       if (message.type === MessageType.CAPTURE_SCREEN_REGION) {
         console.log('📸 SidePanel: Received region capture', message.payload);
         await processRegionCapture(message.payload);
+      }
+
+      // Streaming message handlers
+      if (message.type === MessageType.STREAM_CHUNK) {
+        const payload = message.payload as StreamChunkPayload;
+        console.log('📨📨📨 CHUNK RECEIVED:', {
+          chunkLength: payload.chunk.length,
+          chunkPreview: payload.chunk,
+          payloadRequestId: payload.requestId,
+          currentRequestId: streamingRequestId.current,
+          streamingMessageId,
+          requestMatches: payload.requestId === streamingRequestId.current
+        });
+        
+        if (payload.requestId === streamingRequestId.current) {
+          console.log('✅ Request ID matches - processing chunk');
+          
+          // Add placeholder message on first chunk if not already added
+          setChatMessages(prev => {
+            // Check if we already have a streaming message (last message with empty content and assistant role)
+            const hasStreamingMessage = prev.length > 0 && 
+              prev[prev.length - 1].role === 'assistant' && 
+              prev[prev.length - 1].content === '';
+            
+            if (!hasStreamingMessage) {
+              const streamingMessage: ChatMessage = {
+                role: 'assistant',
+                content: '', // Will be updated via streaming
+                timestamp: new Date(),
+              };
+              return [...prev, streamingMessage];
+            }
+            return prev;
+          });
+          
+          // SIMPLE: Just append to streamingContent state - this will trigger re-render
+          setStreamingContent(prev => {
+            const newContent = prev + payload.chunk;
+            console.log('💬💬💬 Streaming content now:', newContent.length, 'chars');
+            console.log('💬💬💬 Full content preview:', newContent.substring(0, 100));
+            return newContent;
+          });
+        } else {
+          console.warn('⚠️⚠️⚠️ Received chunk for different request:', payload.requestId, 'vs', streamingRequestId.current);
+        }
+      }
+
+      if (message.type === MessageType.STREAM_COMPLETE) {
+        const payload = message.payload as StreamCompletePayload;
+        if (payload.requestId === streamingRequestId.current) {
+          // Use fullResponse from payload if available, fallback to streamingContent
+          const finalContent = payload.fullResponse || streamingContent;
+          console.log('🏁 Stream complete - using final content:', finalContent.length, 'chars');
+          
+          // Create final assistant message
+          const assistantMessage: ChatMessage = {
+            role: 'assistant',
+            content: finalContent,
+            timestamp: new Date(),
+            toolExecutions: payload.toolExecutions,
+          };
+          
+          // Replace the last assistant message (streaming placeholder) with final message
+          setChatMessages(prev => {
+            const messages = [...prev];
+            // Find the last assistant message (should be our streaming placeholder)
+            for (let i = messages.length - 1; i >= 0; i--) {
+              if (messages[i].role === 'assistant') {
+                messages[i] = assistantMessage;
+                break;
+              }
+            }
+            return messages;
+          });
+          
+          // Reset streaming state
+          setStreamingMessageId(null);
+          setStreamingContent('');
+          streamingRequestId.current = null;
+          setIsLoading(false);
+          
+          // Clear attached tabs and staged images after successful streaming
+          console.log('🧹 STREAM COMPLETE - Clearing attached tabs and staged images');
+          setAttachedTabs([]);
+          setStagedImages([]);
+        }
+      }
+
+      if (message.type === MessageType.STREAM_ERROR) {
+        const payload = message.payload as StreamErrorPayload;
+        if (payload.requestId === streamingRequestId.current) {
+          console.error('❌ Stream error:', payload.error);
+          
+          // Add error message
+          const errorMessage: ChatMessage = {
+            role: 'assistant',
+            content: `Error: ${payload.error}`,
+            timestamp: new Date(),
+          };
+          setChatMessages(prev => [...prev, errorMessage]);
+          
+          // Reset streaming state
+          setStreamingMessageId(null);
+          setStreamingContent('');
+          streamingRequestId.current = null;
+          setIsLoading(false);
+        }
       }
     };
 
@@ -501,25 +616,23 @@ const SidePanelInner: React.FC = () => {
           url: tab.url
         });
 
-        // Load basic suggestions immediately, then load intelligent ones
+        // Load suggestions using unified method
         if (tab.url) {
-          setAgentSuggestions(getBasicSuggestions(tab.url));
-          setIntelligentSuggestionsLoaded(false);
-          
-          // Auto-load intelligent suggestions after a short delay if we have the necessary data
-          setTimeout(async () => {
-            if (suggestionMode === 'intelligent' && tab.title && pageContent) {
-              try {
-                console.log('🚀 Auto-loading intelligent suggestions on page load');
-                const intelligentSuggestions = await getIntelligentSuggestions(tab.url!, tab.title, pageContent);
-                setAgentSuggestions(intelligentSuggestions);
-                setIntelligentSuggestionsLoaded(true);
-              } catch (error) {
-                console.error('❌ Failed to auto-load intelligent suggestions:', error);
-                // Keep basic suggestions as fallback
-              }
-            }
-          }, 100); // Small delay to let basic suggestions show first
+          // Reset suggestions status when page changes
+          setSuggestionsStatus('loading');
+          // Load appropriate suggestions immediately
+          getSuggestions(tab.url, {
+            title: tab.title || '',
+            content: pageContent
+          }, suggestionMode).then(suggestions => {
+            setAgentSuggestions(suggestions);
+            setSuggestionsStatus('loaded');
+          }).catch(error => {
+            console.error('❌ Failed to load suggestions:', error);
+            // Fallback to basic suggestions
+            setAgentSuggestions(getBasicSuggestions(tab.url!));
+            setSuggestionsStatus('error');
+          });
         }
       } else {
         console.log('⚠️ Could not get tab information, using fallback');
@@ -551,17 +664,28 @@ const SidePanelInner: React.FC = () => {
   };
 
 
-  const loadIntelligentSuggestionsOnDemand = async () => {
-    if (!intelligentSuggestionsLoaded && suggestionMode === 'intelligent' && currentPageInfo.url && currentPageInfo.content && currentPageInfo.title) {
-      setIntelligentSuggestionsLoaded(true);
-      try {
-        console.log('🚀 Loading intelligent suggestions on demand');
-        const intelligentSuggestions = await getIntelligentSuggestions(currentPageInfo.url, currentPageInfo.title, currentPageInfo.content);
-        setAgentSuggestions(intelligentSuggestions);
-      } catch (error) {
-        console.error('❌ Failed to load intelligent suggestions:', error);
-        // Keep basic suggestions as fallback
+  const loadSuggestionsOnDemand = async () => {
+    // Only load if not already loaded or if suggestions are empty
+    if (suggestionsStatus !== 'loaded' || agentSuggestions.length === 0) {
+      if (currentPageInfo.url) {
+        setSuggestionsStatus('loading');
+        try {
+          console.log('🚀 Loading suggestions on demand');
+          const suggestions = await getSuggestions(currentPageInfo.url, {
+            title: currentPageInfo.title || '',
+            content: currentPageInfo.content || ''
+          }, suggestionMode);
+          setAgentSuggestions(suggestions);
+          setSuggestionsStatus('loaded');
+        } catch (error) {
+          console.error('❌ Failed to load suggestions on demand:', error);
+          // Keep basic suggestions as fallback
+          setAgentSuggestions(getBasicSuggestions(currentPageInfo.url));
+          setSuggestionsStatus('error');
+        }
       }
+    } else {
+      console.log('📋 Suggestions already loaded, skipping reload');
     }
   };
 
@@ -1095,30 +1219,19 @@ const SidePanelInner: React.FC = () => {
       
       // Reload suggestions with the updated mode immediately
       if (currentPageInfo.url) {
-        console.log('🔄 Immediately reloading suggestions with mode:', newMode);
-        // Use the new mode directly instead of relying on state update
-        if (newMode === 'intelligent') {
-          // Load basic first as placeholder
+        console.log('🔄 Reloading suggestions with new mode:', newMode);
+        setSuggestionsStatus('loading'); // Reset status since mode changed
+        try {
+          const suggestions = await getSuggestions(currentPageInfo.url, {
+            title: currentPageInfo.title || '',
+            content: currentPageInfo.content || ''
+          }, newMode);
+          setAgentSuggestions(suggestions);
+          setSuggestionsStatus('loaded');
+        } catch (error) {
+          console.error('❌ Failed to reload suggestions after settings change:', error);
           setAgentSuggestions(getBasicSuggestions(currentPageInfo.url));
-          
-          // Try intelligent if we have content
-          if (currentPageInfo.content && currentPageInfo.title) {
-            try {
-              const intelligentSuggestions = await getIntelligentSuggestions(
-                currentPageInfo.url, 
-                currentPageInfo.title, 
-                currentPageInfo.content
-              );
-              console.log('✅ Settings reload - Intelligent suggestions loaded:', intelligentSuggestions);
-              setAgentSuggestions(intelligentSuggestions);
-            } catch (error) {
-              console.error('❌ Settings reload - Intelligent suggestions failed:', error);
-            }
-          } else {
-            console.log('⚠️ Settings reload - Missing content for intelligent suggestions');
-          }
-        } else {
-          setAgentSuggestions(getBasicSuggestions(currentPageInfo.url));
+          setSuggestionsStatus('error');
         }
       }
     }
@@ -1538,27 +1651,32 @@ const SidePanelInner: React.FC = () => {
         }
       }
 
+      // Generate unique request ID for streaming
+      const requestId = `stream-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      streamingRequestId.current = requestId;
+      console.log('🚀 TEXT INPUT - Setting up streaming with requestId:', requestId);
+
+      // Create initial streaming message
+      const streamMessageId = `streaming-${Date.now()}`;
+      setStreamingMessageId(streamMessageId);
+      setStreamingContent('');
+      console.log('🎬 TEXT INPUT - Set streamingMessageId:', streamMessageId);
+
+      // Don't add placeholder message yet - will be added when first chunk arrives
+
+      // Send streaming request
       const response = await chrome.runtime.sendMessage({
-        type: MessageType.ASK_INTELLA,
+        type: MessageType.ASK_INTELLA_STREAM,
+        requestId,
         payload,
       });
 
-      if (response.success) {
-        const assistantMessage: ChatMessage = {
-          role: 'assistant',
-          content: response.data,
-          timestamp: new Date(),
-          toolExecutions: (response as any).toolExecutions,
-        };
-        setChatMessages(prev => [...prev, assistantMessage]);
-
-        // Clear attached tabs and staged images after successful message
-        console.log('🧹 Clearing attached tabs and staged images after successful message');
-        setAttachedTabs([]);
-        setStagedImages([]);
-      } else {
+      if (!response.success) {
         throw new Error(response.error);
       }
+
+      // Note: streaming completion will be handled by the STREAM_COMPLETE message listener
+      // Don't clear tabs/images here - wait for stream completion
     } catch (error) {
       console.error('💥 Chat error:', error);
 
@@ -1674,7 +1792,44 @@ const SidePanelInner: React.FC = () => {
                         {msg.role === 'user' ? (
                           <div className="text-sm leading-relaxed text-white">{msg.content}</div>
                         ) : (
-                          <MarkdownRenderer content={msg.content} className="text-sm" />
+                          <div className="text-sm">
+                            <MarkdownRenderer 
+                              content={
+                                // Show regular message content OR streaming content if this is the streaming message
+                                (() => {
+                                  // Debug the streaming condition
+                                  const isLastMessage = idx === chatMessages.length - 1;
+                                  const hasStreamingId = !!streamingMessageId;
+                                  const isAssistant = msg.role === 'assistant';
+                                  const isEmpty = msg.content === '';
+                                  const hasStreamingContent = streamingContent.length > 0;
+                                  
+                                  console.log('🔍 Streaming condition check:', {
+                                    idx,
+                                    totalMessages: chatMessages.length,
+                                    isLastMessage,
+                                    hasStreamingId,
+                                    streamingMessageId,
+                                    isAssistant,
+                                    isEmpty,
+                                    msgContentLength: msg.content.length,
+                                    hasStreamingContent,
+                                    streamingContentLength: streamingContent.length
+                                  });
+                                  
+                                  // If this is the last message AND we're streaming AND it's an empty assistant message
+                                  if (isLastMessage && hasStreamingId && isAssistant && isEmpty) {
+                                    console.log('🎬 Showing streaming content:', streamingContent.length, 'chars');
+                                    return streamingContent || '';
+                                  }
+                                  // Otherwise show regular message content  
+                                  console.log('💬 Showing regular message:', msg.content.length, 'chars');
+                                  return msg.content;
+                                })()
+                              } 
+                              className="text-sm" 
+                            />
+                          </div>
                         )}
                         {msg.toolExecutions && msg.toolExecutions.length > 0 && (() => {
                           const messageId = `${idx}-tools`;
@@ -1759,10 +1914,13 @@ const SidePanelInner: React.FC = () => {
                   {isLoading && (
                     <div className="max-w-[85%] mr-auto">
                       <div className="px-4 py-3 rounded-2xl bg-gray-100 dark:bg-darkBg-secondary">
-                        <div className="flex gap-1">
-                          <span className="w-2 h-2 bg-gray-400 dark:bg-darkText-tertiary rounded-full animate-bounce"></span>
-                          <span className="w-2 h-2 bg-gray-400 dark:bg-darkText-tertiary rounded-full animate-bounce [animation-delay:0.2s]"></span>
-                          <span className="w-2 h-2 bg-gray-400 dark:bg-darkText-tertiary rounded-full animate-bounce [animation-delay:0.4s]"></span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm text-gray-600 dark:text-gray-400">Thinking</span>
+                          <div className="flex gap-1">
+                            <span className="w-2 h-2 bg-gray-400 dark:bg-darkText-tertiary rounded-full animate-bounce"></span>
+                            <span className="w-2 h-2 bg-gray-400 dark:bg-darkText-tertiary rounded-full animate-bounce [animation-delay:0.2s]"></span>
+                            <span className="w-2 h-2 bg-gray-400 dark:bg-darkText-tertiary rounded-full animate-bounce [animation-delay:0.4s]"></span>
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -1807,10 +1965,28 @@ const SidePanelInner: React.FC = () => {
             {agentSuggestions.length > 0 && (
               <div className="bg-white dark:bg-darkBg-primary">
                 {/* Header with minimize button */}
-                <div className="flex items-center justify-between px-4 py-2 bg-white dark:bg-darkBg-primary">
+                <div 
+                  className={`flex items-center justify-between px-4 py-2 bg-white dark:bg-darkBg-primary transition-colors ${
+                    suggestionsStatus === 'loading' 
+                      ? 'cursor-not-allowed opacity-60' 
+                      : 'cursor-pointer hover:bg-gray-50 dark:hover:bg-darkBg-tertiary'
+                  }`}
+                  onClick={async () => {
+                    if (suggestionsStatus === 'loading') return; // Disable clicks while loading
+                    if (suggestionsMinimized) {
+                      await loadSuggestionsOnDemand();
+                    }
+                    setSuggestionsMinimized(!suggestionsMinimized);
+                  }}
+                  title={
+                    suggestionsStatus === 'loading' 
+                      ? 'Loading suggestions...' 
+                      : suggestionsMinimized ? 'Expand suggestions' : 'Minimize suggestions'
+                  }
+                >
                   <div className="flex items-center gap-2">
                     <div className="text-sm font-medium text-gray-700 dark:text-darkText-primary">
-                      {suggestionMode === 'intelligent' ? 'Intelligent' : ''} Prompts for {currentPageInfo.url ? (() => {
+                      Context-Aware Prompts for {currentPageInfo.url ? (() => {
                         try {
                           return new URL(currentPageInfo.url).hostname.replace('www.', '');
                         } catch {
@@ -1822,18 +1998,15 @@ const SidePanelInner: React.FC = () => {
                       NEW
                     </span>
                   </div>
-                  <button
-                    onClick={async () => {
-                      if (suggestionsMinimized) {
-                        await loadIntelligentSuggestionsOnDemand();
-                      }
-                      setSuggestionsMinimized(!suggestionsMinimized);
-                    }}
-                    className="p-1 text-gray-500 dark:text-darkText-tertiary hover:text-gray-700 dark:hover:text-darkText-secondary transition-colors rounded"
-                    title={suggestionsMinimized ? 'Expand suggestions' : 'Minimize suggestions'}
-                  >
-                    {suggestionsMinimized ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-                  </button>
+                  <div className="p-1 text-gray-500 dark:text-darkText-tertiary">
+                    {suggestionsStatus === 'loading' ? (
+                      <Loader2 size={16} className="animate-spin" />
+                    ) : suggestionsMinimized ? (
+                      <ChevronUp size={16} />
+                    ) : (
+                      <ChevronDown size={16} />
+                    )}
+                  </div>
                 </div>
                 
                 {/* Suggestions content - collapsible with animation */}
@@ -1849,18 +2022,94 @@ const SidePanelInner: React.FC = () => {
                         >
                           <button
                             onClick={() => {
-                              setQuery(suggestion.prompt);
-                              // Auto-execute the prompt
-                              setTimeout(() => handleSendMessageWithTabs(), 100);
+                              console.log('🔥🔥🔥 SUGGESTION CLICKED:', suggestion.title);
+                              console.log('🔥🔥🔥 SUGGESTION PROMPT:', suggestion.prompt);
+                              console.log('🔥🔥🔥 Current loading state:', isLoading);
+                              // Stream the suggestion prompt
+                              const handleStreamSend = async () => {
+                                if (!suggestion.prompt.trim() || isLoading) {
+                                  console.log('❌ Blocking send - prompt empty or loading:', {
+                                    promptTrimmed: suggestion.prompt.trim(),
+                                    isLoading
+                                  });
+                                  return;
+                                }
+
+                                console.log('✅ Proceeding with suggestion send');
+
+                                // Create user message immediately
+                                const userMessage: ChatMessage = {
+                                  role: 'user',
+                                  content: suggestion.title, // Show the title as user message
+                                  timestamp: new Date(),
+                                };
+
+                                setChatMessages(prev => [...prev, userMessage]);
+                                setQuery(''); // Clear the input
+
+                                // Generate unique request ID for this stream
+                                const requestId = `stream-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+                                streamingRequestId.current = requestId;
+                                console.log('🚀🚀🚀 Setting up streaming with requestId:', requestId);
+
+                                // Create initial streaming message
+                                const streamMessageId = `streaming-${Date.now()}`;
+                                setStreamingMessageId(streamMessageId);
+                                setStreamingContent('');
+                                setIsLoading(true); // Set loading state for streaming
+                                
+                                console.log('🎬🎬🎬 Set streamingMessageId:', streamMessageId);
+                                console.log('📋📋📋 Current streamingRequestId:', streamingRequestId.current);
+
+                                // Don't add placeholder message yet - will be added when first chunk arrives
+
+                                // Send streaming request to backend
+                                try {
+                                  await chrome.runtime.sendMessage({
+                                    type: MessageType.ASK_INTELLA_STREAM,
+                                    requestId,
+                                    payload: {
+                                      question: suggestion.prompt,
+                                      model: selectedModel,
+                                      attachments: [],
+                                      contextTabs: attachedTabs.concat(
+                                        currentPageInfo.hasInfo && currentPageInfo.tabId !== undefined && currentPageInfo.url
+                                          ? [{
+                                              id: currentPageInfo.tabId,
+                                              title: currentPageInfo.title || 'Current Page',
+                                              url: currentPageInfo.url,
+                                              favIconUrl: currentPageInfo.favicon
+                                            }] 
+                                          : []
+                                      ),
+                                    }
+                                  });
+                                } catch (error) {
+                                  console.error('Error starting stream:', error);
+                                  setIsLoading(false);
+                                  setStreamingMessageId(null);
+                                  setStreamingContent('');
+                                  streamingRequestId.current = null;
+                                }
+                              };
+                              
+                              handleStreamSend().catch(error => {
+                                console.error('❌ Stream send failed:', error);
+                              });
                             }}
                             className="w-full flex items-start gap-3 p-2 rounded-lg hover:bg-gray-50 dark:hover:bg-darkBg-tertiary transition text-left"
                           >
-                            <div className="w-7 h-7 rounded-full bg-gray-100 dark:bg-darkBg-secondary flex items-center justify-center flex-shrink-0">
+                            <div className="w-6 h-6 flex items-center justify-center flex-shrink-0">
                               <span className="text-sm">{suggestion.icon}</span>
                             </div>
                             <div className="flex-1 min-w-0">
-                              <div className="text-sm font-medium text-gray-900 dark:text-darkText-primary mb-0.5">{suggestion.title}</div>
-                              <div className="text-xs text-gray-500 dark:text-darkText-tertiary line-clamp-2">{suggestion.description}</div>
+                              <div className="text-sm text-gray-900 dark:text-darkText-primary truncate">
+                                <span className="font-medium">{suggestion.title}</span>
+                                {/* <span className="text-gray-500 dark:text-darkText-tertiary ml-2">• {suggestion.description}</span> */}
+                                {suggestion.responseLimit && (
+                                  <span className="text-blue-600 dark:text-blue-400 ml-2 text-xs">({suggestion.responseLimit})</span>
+                                )}
+                              </div>
                             </div>
                           </button>
                           {/* Pen icon for editing */}

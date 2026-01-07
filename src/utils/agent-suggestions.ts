@@ -8,6 +8,7 @@ export interface AgentSuggestion {
   title: string;
   description: string;
   prompt: string;
+  responseLimit?: string; // Brief response instruction like "in 2-3 sentences" or "bullet points only"
 }
 
 export type SuggestionMode = 'basic' | 'intelligent';
@@ -39,19 +40,22 @@ const domainSuggestions: DomainPattern[] = [
         icon: '📝',
         title: 'Summarize repository',
         description: 'Get a comprehensive overview of this repository\'s purpose and structure',
-        prompt: 'Please analyze this GitHub repository and provide a comprehensive summary including: 1) The main purpose and functionality, 2) Key technologies and dependencies used, 3) Project structure and organization, 4) Notable features or capabilities, 5) Getting started steps if available.',
+        prompt: 'Please analyze this GitHub repository and provide a comprehensive summary including: 1) The main purpose and functionality, 2) Key technologies and dependencies used, 3) Project structure and organization, 4) Notable features or capabilities, 5) Getting started steps if available. Please keep your response to 4-5 bullet points.',
+        responseLimit: 'in 4-5 bullet points'
       },
       {
         icon: '🔍',
         title: 'Explain this code',
         description: 'Get a detailed explanation of the code visible on this page',
-        prompt: 'Please analyze the code visible on this page and provide: 1) A clear explanation of what this code does, 2) Key functions or classes and their purposes, 3) Any notable patterns or best practices used, 4) Potential use cases or examples of how this code would be used.',
+        prompt: 'Please analyze the code visible on this page and provide: 1) A clear explanation of what this code does, 2) Key functions or classes and their purposes, 3) Any notable patterns or best practices used, 4) Potential use cases or examples of how this code would be used. Please keep your response brief and to the point.',
+        responseLimit: 'in 3-4 sentences'
       },
       {
         icon: '🐛',
         title: 'Review for issues',
         description: 'Identify potential bugs, security issues, or improvements',
-        prompt: 'Please review the code on this page for: 1) Potential bugs or edge cases not handled, 2) Security vulnerabilities or concerns, 3) Performance optimization opportunities, 4) Code quality improvements (readability, maintainability), 5) Best practices that could be applied.',
+        prompt: 'Please review the code on this page for: 1) Potential bugs or edge cases not handled, 2) Security vulnerabilities or concerns, 3) Performance optimization opportunities, 4) Code quality improvements (readability, maintainability), 5) Best practices that could be applied. Please provide a concise list of findings.',
+        responseLimit: 'as a brief list'
       },
     ],
   },
@@ -64,19 +68,22 @@ const domainSuggestions: DomainPattern[] = [
         icon: '📚',
         title: 'Summarize documentation',
         description: 'Get a concise summary of this documentation page',
-        prompt: 'Please summarize this documentation page including: 1) The main topic or API being documented, 2) Key concepts or features explained, 3) Important parameters, options, or configurations, 4) Code examples and their purposes, 5) Common use cases or best practices mentioned.',
+        prompt: 'Please summarize this documentation page including: 1) The main topic or API being documented, 2) Key concepts or features explained, 3) Important parameters, options, or configurations, 4) Code examples and their purposes, 5) Common use cases or best practices mentioned. Please provide a concise summary in 3-4 bullet points.',
+        responseLimit: 'in 3-4 bullet points'
       },
       {
         icon: '🚀',
         title: 'Quick start guide',
         description: 'Extract getting started steps and essential setup information',
-        prompt: 'Based on this documentation, provide a quick start guide including: 1) Prerequisites or requirements, 2) Installation or setup steps, 3) Basic configuration needed, 4) A simple "Hello World" example if applicable, 5) Next steps or where to learn more.',
+        prompt: 'Based on this documentation, provide a quick start guide including: 1) Prerequisites or requirements, 2) Installation or setup steps, 3) Basic configuration needed, 4) A simple "Hello World" example if applicable, 5) Next steps or where to learn more. Please format as numbered steps.',
+        responseLimit: 'as numbered steps'
       },
       {
         icon: '💡',
         title: 'Find examples',
         description: 'Locate and explain code examples from this documentation',
-        prompt: 'Please find and explain the code examples on this page: 1) What each example demonstrates, 2) How to use or adapt each example, 3) Important parameters or options shown, 4) Common patterns or best practices illustrated, 5) Potential pitfalls or gotchas to avoid.',
+        prompt: 'Please find and explain the code examples on this page: 1) What each example demonstrates, 2) How to use or adapt each example, 3) Important parameters or options shown, 4) Common patterns or best practices illustrated, 5) Potential pitfalls or gotchas to avoid. Please keep explanations brief.',
+        responseLimit: 'in 1-2 sentences per example'
       },
     ],
   },
@@ -258,6 +265,72 @@ const intelligentSuggestionsCache = new Map<string, CachedSuggestions>();
 const CACHE_EXPIRY_MS = 30 * 60 * 1000;
 
 /**
+ * URL patterns that should use intelligent prompts
+ * These are specific content pages, not general feeds
+ */
+const intelligentPromptPatterns = [
+  // Twitter/X specific posts
+  /^https?:\/\/(twitter\.com|x\.com)\/[^\/]+\/status\/\d+/i,
+  
+  // Gmail specific emails (not just inbox view)
+  /^https?:\/\/mail\.google\.com\/mail\/u\/\d+\/#inbox\/[a-f0-9]+$/i,
+  
+  // LinkedIn specific posts
+  /^https?:\/\/www\.linkedin\.com\/posts\//i,
+  /^https?:\/\/www\.linkedin\.com\/feed\/update\/urn:li:activity:\d+/i,
+  
+  // Facebook specific posts
+  /^https?:\/\/(www\.)?facebook\.com\/[^\/]+\/posts\/\d+/i,
+  /^https?:\/\/(www\.)?facebook\.com\/photo\//i,
+  
+  // Reddit specific posts
+  /^https?:\/\/(www\.)?reddit\.com\/r\/[^\/]+\/comments\//i,
+  
+  // YouTube specific videos
+  /^https?:\/\/(www\.)?youtube\.com\/watch\?v=/i,
+  /^https?:\/\/youtu\.be\//i,
+  
+  // GitHub specific pages (repos, issues, PRs)
+  /^https?:\/\/github\.com\/[^\/]+\/[^\/]+\/(issues|pull|blob|tree|commit)/i,
+  
+  // News article pages (specific articles, not homepage feeds)
+  /^https?:\/\/(www\.)?(nytimes\.com)\/\d{4}\/\d{2}\/\d{2}\//i,
+  /^https?:\/\/(www\.)?(wsj\.com)\/articles\//i,
+  /^https?:\/\/(www\.)?(reuters\.com)\/[^\/]+\/[^\/]+\//i,
+  
+  // Documentation pages (specific docs, not landing pages)
+  /^https?:\/\/[^\/]*docs?[^\/]*\/[^\/]+\//i,
+  
+  // Stack Overflow specific questions
+  /^https?:\/\/stackoverflow\.com\/questions\/\d+/i,
+  
+  // Product pages on e-commerce sites
+  /^https?:\/\/(www\.)?amazon\.[^\/]+\/(dp|gp\/product)\/[A-Z0-9]+/i,
+  
+  // Medium articles
+  /^https?:\/\/[^\/]*medium\.com\/[^\/]+\/[^\/]+-[a-f0-9]+/i,
+  
+  // Substack articles
+  /^https?:\/\/[^\/]+\.substack\.com\/p\//i,
+];
+
+/**
+ * Check if a URL should use intelligent prompts based on pattern matching
+ */
+export function shouldUseIntelligentPrompts(url: string): boolean {
+  if (!url || typeof url !== 'string') {
+    return false;
+  }
+  
+  try {
+    return intelligentPromptPatterns.some(pattern => pattern.test(url));
+  } catch (error) {
+    console.error('Error checking intelligent prompt patterns:', error);
+    return false;
+  }
+}
+
+/**
  * Generate a hash for URL + content to detect significant page changes
  */
 function generateContentHash(url: string, title: string, content: string): string {
@@ -278,17 +351,17 @@ function generateContentHash(url: string, title: string, content: string): strin
 function getCachedSuggestions(url: string, title: string, content: string): AgentSuggestion[] | null {
   const contentHash = generateContentHash(url, title, content);
   const cached = intelligentSuggestionsCache.get(url);
-  
+
   if (!cached) return null;
-  
+
   const isExpired = Date.now() - cached.timestamp > CACHE_EXPIRY_MS;
   const contentChanged = cached.contentHash !== contentHash;
-  
+
   if (isExpired || contentChanged) {
     intelligentSuggestionsCache.delete(url);
     return null;
   }
-  
+
   console.log('🎯 Using cached intelligent suggestions for:', url);
   return cached.suggestions;
 }
@@ -297,14 +370,14 @@ function getCachedSuggestions(url: string, title: string, content: string): Agen
  * Cache intelligent suggestions
  */
 function cacheIntelligentSuggestions(
-  url: string, 
-  title: string, 
-  content: string, 
+  url: string,
+  title: string,
+  content: string,
   suggestions: AgentSuggestion[]
 ): void {
   const contentHash = generateContentHash(url, title, content);
   const urlHash = url.split('?')[0]; // Remove query params for grouping
-  
+
   intelligentSuggestionsCache.set(url, {
     url,
     urlHash,
@@ -313,7 +386,7 @@ function cacheIntelligentSuggestions(
     pageTitle: title,
     contentHash
   });
-  
+
   console.log('💾 Cached intelligent suggestions for:', url);
 }
 
@@ -326,6 +399,9 @@ export async function getIntelligentSuggestions(
   content: string
 ): Promise<AgentSuggestion[]> {
   try {
+    if (!url) {
+      return defaultSuggestions;
+    }
     // Check cache first
     const cached = getCachedSuggestions(url, title, content);
     if (cached) return cached;
@@ -422,21 +498,54 @@ export function getBasicSuggestions(url: string): AgentSuggestion[] {
 }
 
 /**
- * Main function to get agent suggestions with mode support
+ * Main function to get suggestions - automatically determines if intelligent or basic should be used
+ */
+export async function getSuggestions(
+  url: string,
+  pageData?: { title: string; content: string },
+  forceMode?: SuggestionMode
+): Promise<AgentSuggestion[]> {
+  let useIntelligent = false;
+  
+  if (forceMode === 'basic') {
+    useIntelligent = false;
+  } else if (forceMode === 'intelligent') {
+    useIntelligent = true;
+  } else {
+    // Auto-determine based on URL patterns
+    useIntelligent = shouldUseIntelligentPrompts(url);
+  }
+  
+  if (useIntelligent && pageData?.title && pageData?.content) {
+    try {
+      console.log('🤖 Using intelligent suggestions for URL:', url);
+      return await getIntelligentSuggestions(url, pageData.title, pageData.content);
+    } catch (error) {
+      console.error('❌ Intelligent suggestions failed, falling back to basic:', error);
+      return getBasicSuggestions(url);
+    }
+  }
+  
+  console.log('📋 Using basic suggestions for URL:', url);
+  return getBasicSuggestions(url);
+}
+
+/**
+ * @deprecated Use getSuggestions instead
  */
 export async function getAgentSuggestions(
-  url: string, 
+  url: string,
   mode: SuggestionMode = 'basic',
   pageData?: { title: string; content: string }
 ): Promise<AgentSuggestion[]> {
   if (mode === 'basic') {
     return getBasicSuggestions(url);
   }
-  
+
   if (mode === 'intelligent' && pageData) {
     return await getIntelligentSuggestions(url, pageData.title, pageData.content);
   }
-  
+
   // Fallback to basic if intelligent mode requested but no page data
   return getBasicSuggestions(url);
 }

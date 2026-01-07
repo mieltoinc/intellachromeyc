@@ -6,8 +6,8 @@
   "permissions": [
     "storage",
     "activeTab",
-    "scripting",
     "tabs",
+    "tabGroups",
     "contextMenus",
     "sidePanel",
     "identity"

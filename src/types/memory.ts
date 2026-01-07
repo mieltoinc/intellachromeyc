@@ -107,7 +107,7 @@ export const DEFAULT_SETTINGS: UserSettings = {
   defaultAction: 'popup',
   ingestionMethod: 'both',
   isAnalysisActive: true,
-  selectedModel: 'gpt-4o',
+  selectedModel: 'gpt-5-nano',
   enableStreaming: true,
   
   // Feature 4: Privacy & Blocked Sites

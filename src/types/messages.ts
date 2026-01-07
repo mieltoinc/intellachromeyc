@@ -33,6 +33,10 @@ export enum MessageType {
   
   // AI operations
   ASK_INTELLA = 'ASK_INTELLA',
+  ASK_INTELLA_STREAM = 'ASK_INTELLA_STREAM',
+  STREAM_CHUNK = 'STREAM_CHUNK',
+  STREAM_COMPLETE = 'STREAM_COMPLETE',
+  STREAM_ERROR = 'STREAM_ERROR',
   IMPROVE_TEXT = 'IMPROVE_TEXT',
   REWRITE_TEXT = 'REWRITE_TEXT',
   TRANSLATE_TEXT = 'TRANSLATE_TEXT',
@@ -160,5 +164,25 @@ export interface TabInfo {
 
 export interface GetTabContentPayload {
   tabId: number;
+}
+
+// Streaming message interfaces
+export interface StreamChunkPayload {
+  requestId: string;
+  chunk: string;
+  messageId: string;
+}
+
+export interface StreamCompletePayload {
+  requestId: string;
+  messageId: string;
+  toolExecutions?: any[];
+  fullResponse?: string;
+}
+
+export interface StreamErrorPayload {
+  requestId: string;
+  messageId: string;
+  error: string;
 }
 

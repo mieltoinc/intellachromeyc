@@ -70,8 +70,7 @@ export class AISDKClient {
 
       this.config = {
         baseUrl: aiSdkBaseUrl,
-        model: 'gpt-4o',
-        temperature: 0.7,
+        model: 'gpt-5-nano',
         maxTokens: 2048,
       };
 
@@ -165,6 +164,11 @@ export class AISDKClient {
     } = options;
 
     console.log('🎯 Final model selected:', model);
+    
+    // For debugging: warn about potentially unsupported models
+    if (model === 'gpt-5-nano') {
+      console.warn('⚠️ Using gpt-5-nano - this model may not be available on Mielto endpoint');
+    }
 
     // Check if this is a model that doesn't support temperature
     // Reasoning models (o1, o3) and GPT-5 models don't support temperature
@@ -189,16 +193,18 @@ export class AISDKClient {
         : `${baseUrlWithoutTrailingSlash}/api/v1`;
       
       console.log('🌐 Using baseURL:', baseUrl);
+      console.log('🔑 Using API key:', apiKey ? `${apiKey.substring(0, 10)}...` : 'NO API KEY');
 
       // Create OpenAI provider with custom base URL using createOpenAI
       // This creates a callable provider function that accepts model names
+      console.log('🛠️ Creating OpenAI provider with:', { baseURL: baseUrl, hasApiKey: !!apiKey });
       const openaiProvider = createOpenAI({
-        apiKey, // 
+        apiKey,
         baseURL: baseUrl,
       });
 
       // Call the provider function with the model name to get the language model
-      const languageModel = openaiProvider.chat(model || 'gpt-4o');
+      const languageModel = openaiProvider.chat(model || 'gpt-5-nano');
 
       // Prepare messages for AI SDK
       const conversationMessages = messages
@@ -332,6 +338,9 @@ export class AISDKClient {
       if (useStreaming) {
         // Use streamText for streaming responses
         console.log('📡 Using streaming mode');
+        console.log('💬 Conversation messages:', JSON.stringify(conversationMessages, null, 2));
+        console.log('🔧 Tools available:', Object.keys(tools).length);
+        
         let streamResult: any;
         if (Object.keys(tools).length > 0) {
           const streamConfig: any = {
@@ -345,6 +354,13 @@ export class AISDKClient {
           if (effectiveTemperature !== undefined) {
             streamConfig.temperature = effectiveTemperature;
           }
+          console.log('🚀 Streaming with tools config:', { 
+            model: model, 
+            messageCount: conversationMessages.length,
+            toolCount: Object.keys(tools).length,
+            maxTokens,
+            temperature: effectiveTemperature
+          });
           streamResult = streamText(streamConfig);
         } else {
           // No tools - simple generation
@@ -357,25 +373,68 @@ export class AISDKClient {
           if (effectiveTemperature !== undefined) {
             streamConfig.temperature = effectiveTemperature;
           }
+          console.log('🚀 Streaming without tools config:', { 
+            model: model, 
+            messageCount: conversationMessages.length,
+            maxTokens,
+            temperature: effectiveTemperature
+          });
           streamResult = streamText(streamConfig);
         }
 
         // Collect streamed text chunks
-        for await (const textChunk of streamResult.textStream) {
-          finalResponse += textChunk;
+        console.log('🔄 Starting text stream collection...');
+        let chunkCount = 0;
+        try {
+          for await (const textChunk of streamResult.textStream) {
+            chunkCount++;
+            console.log(`📝 Stream chunk #${chunkCount}:`, textChunk);
+            finalResponse += textChunk;
+          }
+          console.log(`✅ Stream collection complete. Total chunks: ${chunkCount}, final length: ${finalResponse.length}`);
+        } catch (streamError: any) {
+          console.error('❌ Error during stream collection:', streamError);
+          console.error('❌ Stream error details:', {
+            name: streamError?.name,
+            message: streamError?.message,
+            cause: streamError?.cause,
+            stack: streamError?.stack
+          });
+          throw streamError;
+        }
+      
+        if (chunkCount === 0) {
+          console.warn('⚠️ No chunks received from text stream - checking for errors...');
+          // Try to get any error information from the stream result
+          try {
+            const streamResponse = await streamResult.response;
+            console.log('🔍 Stream response status:', streamResponse.status, streamResponse.statusText);
+            if (!streamResponse.ok) {
+              const errorText = await streamResponse.text();
+              console.error('❌ Stream response error:', errorText);
+              throw new Error(`HTTP ${streamResponse.status}: ${errorText}`);
+            }
+          } catch (responseError) {
+            console.error('❌ Failed to get stream response details:', responseError);
+          }
         }
 
         // Get final text and usage from stream result (these are Promises)
         try {
           // Try to get the full text if available (some SDK versions provide this)
           const fullText = await streamResult.text;
-          if (fullText && fullText.trim()) {
+          if (fullText && fullText.trim() && fullText.length > finalResponse.length) {
+            console.log('📄 Using streamResult.text as it contains more content');
             finalResponse = fullText;
+          } else {
+            console.log('📄 Using accumulated chunks as final response');
           }
         } catch (e) {
           // text property might not exist, use accumulated response
-          console.log('streamResult.text not available, using accumulated text');
+          console.log('📄 streamResult.text not available, using accumulated text');
         }
+        
+        console.log('📋 Final response length:', finalResponse.length, 'characters');
 
         // Get usage stats
         try {
@@ -421,10 +480,13 @@ export class AISDKClient {
 
       // Fallback if no response was generated
       if (!finalResponse || finalResponse.trim() === '') {
+        console.warn('⚠️ Empty final response detected. Tool executions:', toolExecutions.length);
         finalResponse = toolExecutions.length > 0
           ? `I executed ${toolExecutions.length} tool(s) but did not receive a final response.`
           : 'I apologize, but I could not generate a response.';
       }
+      
+      console.log('✅ Returning final response with length:', finalResponse.length);
 
       return {
         content: finalResponse,
@@ -475,15 +537,8 @@ export class AISDKClient {
       const settings = await storage.getSettings();
       const apiUrl = settings.apiUrl || this.defaultBaseUrl;
       
-      // Check if streaming is enabled
-      const useStreaming = settings.enableStreaming || false;
-      
-      if (!useStreaming) {
-        // Streaming disabled - use generate and simulate streaming
-        console.log('⚠️ Streaming disabled - using non-streaming generation with simulated streaming');
-        const result = await this.generate(messages, options);
-        return this.simulateStream(result.content);
-      }
+      // Force streaming to be enabled for consistency with generate() method
+      console.log('📡 Stream method - forcing streaming enabled');
       
       // For AI SDK, append /api/v1/ to the base URL
       const baseUrlWithoutTrailingSlash = apiUrl.replace(/\/$/, '');
@@ -495,29 +550,104 @@ export class AISDKClient {
 
       // Create OpenAI provider with custom base URL using createOpenAI
       // This creates a callable provider function that accepts model names
+      console.log('🛠️ Creating OpenAI provider with:', { baseURL: baseUrl, hasApiKey: !!apiKey });
       const openaiProvider = createOpenAI({
         apiKey,
         baseURL: baseUrl,
       });
 
       // Call the provider function with the model name to get the language model
-      const languageModel = openaiProvider.chat(model || 'gpt-4o');
+      const languageModel = openaiProvider.chat(model || 'gpt-5-nano');
 
-      // Use AI SDK streamText
-      const result = await streamText({
-        model: languageModel,
-        messages: messages
-          .filter(msg => msg.role !== 'tool') // Filter out tool messages for AI SDK
-          .map(msg => ({
-            role: msg.role as 'user' | 'assistant' | 'system',
-            content: msg.content,
-          })),
-        temperature: effectiveTemperature,
-        maxTokens,
-      } as any);
+      // Prepare messages for AI SDK - same logic as generate()
+      const isReasoningModel = model.includes('o1') || model.includes('o3');
+      const isGPT5Model = model.toLowerCase().includes('gpt-5');
+      
+      const conversationMessages = messages
+        .filter(msg => {
+          // Filter out any 'developer' role messages as they're not supported
+          if ((msg.role as any) === 'developer') {
+            console.warn('⚠️ Filtering out developer role message - not supported by AI models');
+            return false;
+          }
+          return true;
+        })
+        .map(msg => {
+          // For reasoning models and GPT-5, convert system messages to user messages
+          if (msg.role === 'system' && (isReasoningModel || isGPT5Model)) {
+            console.log('🔄 Converting system message to user message for reasoning/GPT-5 model');
+            return {
+              ...msg,
+              role: 'user' as const,
+              content: typeof msg.content === 'string'
+                ? `[System Context] ${msg.content}`
+                : msg.content
+            };
+          }
+          return msg;
+        });
 
-      // Convert stream to AsyncIterable<string>
-      return this.convertStreamToStringIterable(result);
+      // Get tools - same logic as generate()
+      const tools: Record<string, any> = {};
+      const zodSchemas = toolRegistry.getZodSchemasForAI();
+      console.log(`🔧 Found ${zodSchemas.size} tools for streaming`);
+
+      // Create tools using Zod schemas directly
+      for (const [toolName, { description, schema }] of zodSchemas.entries()) {
+        const toolConfig: any = {
+          description,
+          inputSchema: schema,
+          execute: async (args: Record<string, any>) => {
+            console.log(`🛠️ Tool execution in stream: ${toolName}`);
+            const result = await toolRegistry.executeTool(toolName, args);
+            return result.success ? result.result : { error: result.error };
+          },
+        };
+        tools[toolName] = tool(toolConfig);
+      }
+
+      // Use streamText with tools - same logic as generate()
+      let streamResult: any;
+      if (Object.keys(tools).length > 0) {
+        const streamConfig: any = {
+          model: languageModel,
+          messages: conversationMessages as any,
+          tools,
+          maxTokens,
+        };
+        // Only add temperature if the model supports it
+        if (effectiveTemperature !== undefined) {
+          streamConfig.temperature = effectiveTemperature;
+        }
+        console.log('🚀 Streaming with tools config:', { 
+          model: model, 
+          messageCount: conversationMessages.length,
+          toolCount: Object.keys(tools).length,
+          maxTokens,
+          temperature: effectiveTemperature
+        });
+        streamResult = streamText(streamConfig);
+      } else {
+        // No tools - simple generation
+        const streamConfig: any = {
+          model: languageModel,
+          messages: conversationMessages as any,
+          maxTokens,
+        };
+        if (effectiveTemperature !== undefined) {
+          streamConfig.temperature = effectiveTemperature;
+        }
+        console.log('🚀 Streaming without tools config:', { 
+          model: model, 
+          messageCount: conversationMessages.length,
+          maxTokens,
+          temperature: effectiveTemperature
+        });
+        streamResult = streamText(streamConfig);
+      }
+
+      // Convert stream to AsyncIterable<string> - same as before
+      return this.convertStreamToStringIterable(streamResult);
     } catch (error) {
       console.error('AI SDK streaming error:', error);
       // Fallback to regular generation and simulate streaming

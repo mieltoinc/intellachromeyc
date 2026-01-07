@@ -4,6 +4,7 @@
  */
 
 import { supabase } from './supabase';
+import { storage } from '@/utils/storage';
 
 export interface LoginRequest {
   email: string;
@@ -17,19 +18,87 @@ export interface LoginTokenResponse {
   user: SessionResponse;
 }
 
+export interface AuthStrategy {
+  status: string;
+  auth_id: string;
+  provider: string;
+  strategy: string;
+}
+
 export interface SessionResponse {
   id: string;
   email: string;
   first_name: string;
   last_name: string;
   avatar_url: string;
+  auth_strategy: AuthStrategy;
   status: string;
-  workspaces: any[];
+  last_login_at: string;
+  hashed_password: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WorkspaceBilling {
+  plan: string;
+  plan_id: string;
+  has_active_wallet: boolean;
+  stripe_customer_id: string;
+  has_active_subscription: boolean;
+}
+
+export interface Workspace {
+  id: string;
+  name: string;
+  slug: string;
+  description: string;
+  logo_url: string;
+  status: string;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+  tier_id: string;
+  is_owner: boolean;
+  role: string;
+  permissions: Record<string, any>;
+  workspace_user_id: string;
+  settings?: Record<string, any>;
+  billing?: WorkspaceBilling;
+}
+
+export interface WorkspaceUser {
+  id: string;
+  user_id: string;
+  workspace_id: string;
+  role: string;
+  status: string;
+  is_owner: boolean;
+  permissions: Record<string, any>;
+  settings: Record<string, any>;
+  invited_at: string | null;
+  invited_by: string | null;
+  created_at: string;
+  updated_at: string;
+  workspace?: Workspace;
+}
+
+export interface CurrentSession {
+  user: SessionResponse;
+  workspace: Workspace;
+  workspace_user: WorkspaceUser;
+  auth_type: string;
+  auth_provider: string;
 }
 
 class MieltoAuth {
   private baseUrl: string = import.meta.env.VITE_MIELTO_API_URL || 'https://api.mielto.com';
   private token: string | null = null;
+  
+  // In-memory session cache to prevent multiple simultaneous calls
+  private cachedSession: CurrentSession | null = null;
+  private sessionCacheTimestamp: number = 0;
+  private readonly SESSION_CACHE_TTL = 2000; // 2 seconds - short enough to be fresh, long enough to dedupe
+  private pendingSessionPromise: Promise<CurrentSession | null> | null = null;
 
   constructor() {
     this.loadTokensFromStorage();
@@ -38,6 +107,93 @@ class MieltoAuth {
   private async loadTokensFromStorage() {
     const result = await chrome.storage.sync.get(['mielto_token', 'mielto_refresh_token']);
     this.token = result.mielto_token || null;
+    return result
+  }
+
+  /**
+   * Refresh the access token using the refresh token
+   * This keeps users logged in for extended periods
+   * Can be called proactively or when token expires
+   */
+  async refreshToken(): Promise<boolean> {
+    try {
+      const result = await chrome.storage.sync.get(['mielto_refresh_token']);
+      const refreshToken = result.mielto_refresh_token;
+
+      if (!refreshToken) {
+        console.log('🔑 AUTH - No refresh token available');
+        return false;
+      }
+
+      console.log('🔄 AUTH - Refreshing access token...');
+
+      // First, set the session with the refresh token so Supabase knows about it
+      const { error: setSessionError } = await supabase.auth.setSession({
+        access_token: this.token || '',
+        refresh_token: refreshToken,
+      });
+
+      if (setSessionError) {
+        console.error('🔑 AUTH - Failed to set session for refresh:', setSessionError);
+        await this.clearTokensFromStorage();
+        return false;
+      }
+
+      // Now refresh the session
+      const { data, error } = await supabase.auth.refreshSession();
+
+      if (error || !data.session) {
+        console.error('🔑 AUTH - Token refresh failed:', error);
+        // If refresh fails, clear tokens (user needs to login again)
+        await this.clearTokensFromStorage();
+        return false;
+      }
+
+      const newAccessToken = data.session.access_token;
+      const newRefreshToken = data.session.refresh_token || refreshToken;
+
+      // Save the new tokens
+      await this.saveTokensToStorage(newAccessToken, newRefreshToken);
+      console.log('✅ AUTH - Token refreshed successfully');
+
+      return true;
+    } catch (error) {
+      console.error('🔑 AUTH - Error refreshing token:', error);
+      await this.clearTokensFromStorage();
+      return false;
+    }
+  }
+
+  /**
+   * Private helper to refresh token and return the new token
+   * Used internally by getCurrentSession
+   */
+  private async refreshTokenInternal(): Promise<string | null> {
+    const result = await chrome.storage.sync.get(['mielto_refresh_token']);
+    const refreshToken = result.mielto_refresh_token;
+
+    if (!refreshToken) {
+      return null;
+    }
+
+    // First set the session, then refresh it
+    await supabase.auth.setSession({
+      access_token: this.token || '',
+      refresh_token: refreshToken,
+    });
+
+    const { data, error } = await supabase.auth.refreshSession();
+
+    if (error || !data.session) {
+      await this.clearTokensFromStorage();
+      return null;
+    }
+
+    const newAccessToken = data.session.access_token;
+    const newRefreshToken = data.session.refresh_token || refreshToken;
+    await this.saveTokensToStorage(newAccessToken, newRefreshToken);
+
+    return newAccessToken;
   }
 
   private async saveTokensToStorage(token: string, refreshToken: string) {
@@ -49,16 +205,93 @@ class MieltoAuth {
   }
 
   private async clearTokensFromStorage() {
-    await chrome.storage.sync.remove(['mielto_token', 'mielto_refresh_token', 'mielto_user', 'mielto_workspace']);
+    await chrome.storage.sync.remove([
+      'mielto_token', 
+      'mielto_refresh_token', 
+      'mielto_user', 
+      'mielto_workspace', 
+      'mielto_workspace_user',
+      'mielto_session_cache_timestamp' // Also clear cache timestamp
+    ]);
     this.token = null;
   }
 
   private async saveCurrentSession(user: SessionResponse) {
-    await chrome.storage.sync.set({ mielto_user: user });
+    await chrome.storage.sync.set({ 
+      mielto_user: user,
+      mielto_session_cache_timestamp: Date.now() // Store timestamp for cache invalidation
+    });
   }
 
   private async setCurrentSessionWorkspace(workspace: any) {
-    await chrome.storage.sync.set({ mielto_workspace: workspace });
+    await chrome.storage.sync.set({ 
+      mielto_workspace: workspace,
+      mielto_session_cache_timestamp: Date.now() // Update timestamp
+    });
+  }
+
+  /**
+   * Check if cached session data is still valid
+   * Cache is considered invalid if:
+   * - Older than 5 minutes (force refresh periodically)
+   * - Token might be expired
+   */
+  private async isCacheValid(): Promise<boolean> {
+    try {
+      const result = await chrome.storage.sync.get(['mielto_session_cache_timestamp']);
+      const cacheTimestamp = result.mielto_session_cache_timestamp;
+      
+      if (!cacheTimestamp) {
+        return false; // No cache timestamp means cache is invalid
+      }
+
+      const CACHE_MAX_AGE = 5 * 60 * 1000; // 5 minutes
+      const cacheAge = Date.now() - cacheTimestamp;
+      
+      if (cacheAge > CACHE_MAX_AGE) {
+        console.log('🔑 AUTH - Cache expired (older than 5 minutes)');
+        return false;
+      }
+
+      return true;
+    } catch (error) {
+      console.error('🔑 AUTH - Error checking cache validity:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Validate token by making a lightweight API call
+   * Returns true if token is valid, false otherwise
+   */
+  private async validateToken(token: string): Promise<boolean> {
+    try {
+      // Use AbortController for timeout (more compatible than AbortSignal.timeout)
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+
+      const response = await fetch(`${this.baseUrl}/api/v1/auth/session`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer supabase_${token}`,
+        },
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+      return response.ok;
+    } catch (error: any) {
+      // Distinguish between network errors and auth failures
+      if (error.name === 'AbortError' || error.name === 'TimeoutError' || error.name === 'TypeError' || error.message?.includes('fetch')) {
+        console.warn('🔑 AUTH - Network error during token validation (not treating as auth failure):', error.message);
+        // Network error - don't treat as auth failure, return true to allow cached data
+        return true;
+      }
+      
+      console.error('🔑 AUTH - Token validation failed:', error);
+      return false;
+    }
   }
 
 
@@ -206,8 +439,17 @@ class MieltoAuth {
         first_name: sessionData.user.first_name || '',
         last_name: sessionData.user.last_name || '',
         avatar_url: sessionData.user.avatar_url || '',
-        status: 'active',
-        workspaces: sessionData.workspace ? [sessionData.workspace] : [],
+        auth_strategy: sessionData.user.auth_strategy || {
+          status: 'success',
+          auth_id: '',
+          provider: 'supabase',
+          strategy: 'email_password',
+        },
+        status: sessionData.user.status || 'active',
+        last_login_at: sessionData.user.last_login_at || new Date().toISOString(),
+        hashed_password: sessionData.user.hashed_password || null,
+        created_at: sessionData.user.created_at || new Date().toISOString(),
+        updated_at: sessionData.user.updated_at || new Date().toISOString(),
       });
       console.log('🔐 AUTH - User session saved');
     }
@@ -228,8 +470,12 @@ class MieltoAuth {
         first_name: sessionData.user.first_name || '',
         last_name: sessionData.user.last_name || '',
         avatar_url: sessionData.user.avatar_url || '',
-        status: 'active',
-        workspaces: sessionData.workspace ? [sessionData.workspace] : [],
+        auth_strategy: sessionData.user.auth_strategy,
+        status: sessionData.user.status || 'active',
+        last_login_at: sessionData.user.last_login_at || new Date().toISOString(),
+        hashed_password: sessionData.user.hashed_password || null,
+        created_at: sessionData.user.created_at || new Date().toISOString(),
+        updated_at: sessionData.user.updated_at || new Date().toISOString(),
       },
     };
 
@@ -276,56 +522,125 @@ class MieltoAuth {
       return await this.completeMieltoSession(supabaseToken, refreshToken);
     } catch (error: any) {
       console.error('🔐 AUTH - Login error:', error);
-      
+
       // Sign out from Supabase if something went wrong
       try {
         await supabase.auth.signOut();
       } catch (signOutError) {
         console.error('🔐 AUTH - Failed to sign out from Supabase:', signOutError);
       }
-      
+
       // Provide more specific error messages
       if (error.message?.includes('Invalid login credentials')) {
         throw new Error('Invalid email or password. Please check your credentials and try again.');
       }
-      
+
       if (error.name === 'TypeError' && error.message.includes('fetch')) {
         throw new Error('Network error: Unable to connect to authentication server. Please check your internet connection.');
       }
-      
+
       throw new Error(error.message || 'Authentication failed');
     }
   }
 
-  async getCurrentSession(count: number = 2, accessToken?: string): Promise<{user: SessionResponse, workspace: any} | null> {
+  async getCurrentSession(count: number = 2, accessToken?: string): Promise<CurrentSession | null> {
+    // If there's a pending request, wait for it instead of making a new one
+    if (this.pendingSessionPromise && !accessToken) {
+      console.log('🔑 AUTH - Reusing pending session request');
+      return this.pendingSessionPromise;
+    }
+
+    // Check in-memory cache first (very fast)
+    const now = Date.now();
+    if (this.cachedSession && (now - this.sessionCacheTimestamp) < this.SESSION_CACHE_TTL && !accessToken) {
+      console.log('🔑 AUTH - Returning cached session from memory');
+      return this.cachedSession;
+    }
+
+    // Create a promise for this request and cache it to deduplicate concurrent calls
+    const sessionPromise = this.fetchCurrentSession(count, accessToken);
+    
+    // Only cache the promise if this is not a retry (no accessToken means initial call)
+    if (!accessToken) {
+      this.pendingSessionPromise = sessionPromise;
+      sessionPromise.finally(() => {
+        this.pendingSessionPromise = null;
+      });
+    }
+
+    return sessionPromise;
+  }
+
+  private async fetchCurrentSession(count: number = 2, accessToken?: string): Promise<CurrentSession | null> {
     let token = accessToken ? accessToken : this.token;
     let authHeader = '';
 
-    // Check if we have an API key in settings first
-    const settings = await chrome.storage.sync.get(['mielto_settings']);
-    const apiKey = settings.mielto_settings?.apiKey;
+    if (!token) {
+      const result = await this.loadTokensFromStorage();
+      if (result.mielto_token) {
+        token = result.mielto_token;
+      }
+    }
 
-    if (apiKey) {
-      console.log('🔑 AUTH - Using API key for authentication');
-      authHeader = `Bearer ${apiKey}`;
-    } else if (token) {
+    // Check if we have an API key in settings first
+    const settings = await storage.getSettings();
+    const apiKey = settings.apiKey;
+
+    if (token) {
       console.log('🔑 AUTH - Using Supabase token for authentication');
       authHeader = `Bearer supabase_${token}`;
+    }
+    else if (apiKey) {
+      console.log('🔑 AUTH - Using API key for authentication');
+      authHeader = `Bearer ${apiKey}`;
     } else {
       console.log('🔑 AUTH - No API key or token available');
       return null;
     }
 
     try {
-      // Get saved user data from storage first (faster) - but only if using token auth
-      if (!apiKey) {
-        const result = await chrome.storage.sync.get(['mielto_user', 'mielto_workspace']);
-        
-        if (result.mielto_user) {
-          return {
-            user: result.mielto_user,
-            workspace: result.mielto_workspace || null,
-          };
+      // FIX #1: Validate cached data before returning it (only for token auth)
+      if (!apiKey && token) {
+        const result = await chrome.storage.sync.get(['mielto_user', 'mielto_workspace', 'mielto_workspace_user']);
+
+        if (result.mielto_user && result.mielto_workspace) {
+          // Check if cache is still valid (not too old)
+          const isCacheStillValid = await this.isCacheValid();
+          
+          if (isCacheStillValid) {
+            // FIX #3: Validate token before returning cached data
+            // Only validate if we don't have a recent in-memory cache
+            console.log('🔑 AUTH - Found cached session, validating token...');
+            const isTokenValid = await this.validateToken(token);
+            
+            if (isTokenValid) {
+              console.log('✅ AUTH - Token validated, returning cached session');
+              const session: CurrentSession = {
+                user: result.mielto_user,
+                workspace: result.mielto_workspace,
+                workspace_user: result.mielto_workspace_user || null,
+                auth_type: 'bearer_token',
+                auth_provider: 'supabase',
+              } as CurrentSession;
+              
+              // Cache in memory for fast access
+              this.cachedSession = session;
+              this.sessionCacheTimestamp = Date.now();
+              
+              return session;
+            } else {
+              console.log('⚠️ AUTH - Cached session found but token validation failed, refreshing...');
+              // Token validation failed, try to refresh
+              const newToken = await this.refreshTokenInternal();
+              if (newToken) {
+                // Retry with new token
+                return this.fetchCurrentSession(count - 1, newToken);
+              }
+              // If refresh fails, continue to API call which will handle it properly
+            }
+          } else {
+            console.log('🔑 AUTH - Cache expired, fetching fresh session data');
+          }
         }
       }
 
@@ -335,23 +650,125 @@ class MieltoAuth {
         'Authorization': authHeader,
       };
 
-      const response = await fetch(`${this.baseUrl}/api/v1/auth/session`, {
-        method: 'GET',
-        headers,
-      });
+      // FIX #2: Add timeout and better error handling
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+
+      let response: Response;
+      try {
+        response = await fetch(`${this.baseUrl}/api/v1/auth/session`, {
+          method: 'GET',
+          headers,
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+      } catch (fetchError: any) {
+        clearTimeout(timeoutId);
+        
+        // FIX #2: Distinguish network errors from auth failures
+        if (fetchError.name === 'AbortError' || fetchError.name === 'TimeoutError') {
+          console.warn('🔑 AUTH - Request timeout (network issue), checking if we have cached data...');
+          // On timeout, return cached data if available (better UX than showing login)
+          if (!apiKey) {
+            const cachedResult = await chrome.storage.sync.get(['mielto_user', 'mielto_workspace', 'mielto_workspace_user']);
+            if (cachedResult.mielto_user && cachedResult.mielto_workspace) {
+              console.log('⚠️ AUTH - Network timeout, returning cached session data');
+              const session: CurrentSession = {
+                user: cachedResult.mielto_user,
+                workspace: cachedResult.mielto_workspace,
+                workspace_user: cachedResult.mielto_workspace_user || null,
+                auth_type: 'bearer_token',
+                auth_provider: 'supabase',
+              } as CurrentSession;
+              
+              // Cache in memory
+              this.cachedSession = session;
+              this.sessionCacheTimestamp = Date.now();
+              
+              return session;
+            }
+          }
+          throw new Error('Network timeout - unable to verify authentication');
+        }
+        
+        if (fetchError.name === 'TypeError' && fetchError.message?.includes('fetch')) {
+          console.warn('🔑 AUTH - Network error (fetch failed), checking if we have cached data...');
+          // Network error - return cached data if available
+          if (!apiKey) {
+            const cachedResult = await chrome.storage.sync.get(['mielto_user', 'mielto_workspace', 'mielto_workspace_user']);
+            if (cachedResult.mielto_user && cachedResult.mielto_workspace) {
+              console.log('⚠️ AUTH - Network error, returning cached session data');
+              const session: CurrentSession = {
+                user: cachedResult.mielto_user,
+                workspace: cachedResult.mielto_workspace,
+                workspace_user: cachedResult.mielto_workspace_user || null,
+                auth_type: 'bearer_token',
+                auth_provider: 'supabase',
+              } as CurrentSession;
+              
+              // Cache in memory
+              this.cachedSession = session;
+              this.sessionCacheTimestamp = Date.now();
+              
+              return session;
+            }
+          }
+          throw new Error('Network error - unable to connect to authentication server');
+        }
+        
+        throw fetchError;
+      }
 
       if (!response.ok) {
         if (response.status === 401 && count > 0 && !apiKey) {
           // Token might be expired, try to refresh (only for token auth)
-          return this.getCurrentSession(count - 1);
+          console.log('🔄 AUTH - Token expired (401), attempting refresh...');
+          const newToken = await this.refreshTokenInternal();
+
+          if (newToken) {
+            // Retry with the new token
+            return this.getCurrentSession(count - 1, newToken);
+          } else {
+            // Refresh failed, clear cache and return null
+            console.error('🔑 AUTH - Token refresh failed, clearing cache and requiring login');
+            await this.clearTokensFromStorage();
+            return null;
+          }
         }
+        
+        // FIX #2: Don't treat server errors (5xx) as auth failures
+        if (response.status >= 500) {
+          console.warn(`🔑 AUTH - Server error (${response.status}), checking if we have cached data...`);
+          // Server error - return cached data if available
+          if (!apiKey) {
+            const cachedResult = await chrome.storage.sync.get(['mielto_user', 'mielto_workspace', 'mielto_workspace_user']);
+            if (cachedResult.mielto_user && cachedResult.mielto_workspace) {
+              console.log('⚠️ AUTH - Server error, returning cached session data');
+              const session: CurrentSession = {
+                user: cachedResult.mielto_user,
+                workspace: cachedResult.mielto_workspace,
+                workspace_user: cachedResult.mielto_workspace_user || null,
+                auth_type: 'bearer_token',
+                auth_provider: 'supabase',
+              } as CurrentSession;
+              
+              // Cache in memory
+              this.cachedSession = session;
+              this.sessionCacheTimestamp = Date.now();
+              
+              return session;
+            }
+          }
+          throw new Error(`Server error (${response.status}) - please try again later`);
+        }
+        
         throw new Error(`HTTP ${response.status}`);
       }
 
       const data = await response.json();
 
-      console.log('🔍 AUTH HANDLER - Got current session data:', { 
-        hasUser: !!data.user, 
+      console.log('🔍 AUTH HANDLER - Got current session data:', {
+        hasUser: !!data.user,
         hasWorkspace: !!data.workspace,
         workspaceId: data.workspace?.id,
         authMethod: apiKey ? 'API_KEY' : 'TOKEN'
@@ -361,18 +778,60 @@ class MieltoAuth {
       if (!apiKey) {
         await this.saveCurrentSession(data.user);
         await this.setCurrentSessionWorkspace(data.workspace);
+        // Also save workspace_user if available
+        if (data.workspace_user) {
+          await chrome.storage.sync.set({ mielto_workspace_user: data.workspace_user });
+        }
+      }
+
+      const session: CurrentSession = {
+        user: data.user,
+        workspace: data.workspace,
+        workspace_user: data.workspace_user,
+        auth_type: data.auth_type || 'bearer_token',
+        auth_provider: data.auth_provider || 'supabase',
+      };
+
+      // Cache the session in memory for fast subsequent access
+      this.cachedSession = session;
+      this.sessionCacheTimestamp = Date.now();
+      console.log('✅ AUTH - Session cached in memory');
+
+      return session;
+    } catch (error: any) {
+      // FIX #2: Better error logging to distinguish error types
+      if (error.message?.includes('Network') || error.message?.includes('timeout')) {
+        console.warn('🔑 AUTH - Network error during session fetch (not treating as auth failure):', error.message);
+        // For network errors, try to return cached data if available
+        if (!apiKey) {
+          const cachedResult = await chrome.storage.sync.get(['mielto_user', 'mielto_workspace', 'mielto_workspace_user']);
+          if (cachedResult.mielto_user && cachedResult.mielto_workspace) {
+            console.log('⚠️ AUTH - Returning cached session due to network error');
+            const session: CurrentSession = {
+              user: cachedResult.mielto_user,
+              workspace: cachedResult.mielto_workspace,
+              workspace_user: cachedResult.mielto_workspace_user || null,
+              auth_type: 'bearer_token',
+              auth_provider: 'supabase',
+            } as CurrentSession;
+            
+            // Cache in memory
+            this.cachedSession = session;
+            this.sessionCacheTimestamp = Date.now();
+            
+            return session;
+          }
+        }
       }
       
-      return {user: data.user, workspace: data.workspace};
-    } catch (error: any) { 
-      console.error('Get session error:', error);
+      console.error('🔑 AUTH - Get session error:', error);
       return null;
     }
   }
 
   async signOut(): Promise<void> {
     console.log('🔐 AUTH - Starting sign out process');
-    
+
     try {
       // Sign out from Supabase
       console.log('🔐 AUTH - Signing out from Supabase...');
@@ -404,21 +863,33 @@ class MieltoAuth {
       console.error('🔐 AUTH - Sign out error:', error);
       // Continue with local cleanup even if remote signout fails
     }
-    
+
     // Clear local storage
     await this.clearTokensFromStorage();
+    
+    // Clear in-memory cache
+    this.cachedSession = null;
+    this.sessionCacheTimestamp = 0;
+    this.pendingSessionPromise = null;
+    
     console.log('🔐 AUTH - Local storage cleared, sign out complete');
   }
 
+  /**
+   * Fast authentication check - optimized to avoid showing login screen unnecessarily
+   * This is a lightweight check that doesn't do full validation
+   * Full validation happens in getCurrentSession() when actually needed
+   */
   async isAuthenticated(): Promise<boolean> {
     // Check for API key first
-    const settings = await chrome.storage.sync.get(['mielto_settings']);
-    const apiKey = settings.mielto_settings?.apiKey;
-    
+    const settings = await storage.getSettings();
+    const apiKey = settings.apiKey;
+
     if (apiKey) {
-      console.log('🔑 AUTH - API key found, checking session...');
-      const session = await this.getCurrentSession();
-      return session !== null;
+      // For API key, we can assume authenticated if key exists
+      // Full validation will happen when getCurrentSession is called
+      console.log('🔑 AUTH - API key found, assuming authenticated (fast path)');
+      return true;
     }
 
     // Fall back to token auth
@@ -431,9 +902,31 @@ class MieltoAuth {
       return false;
     }
 
-    console.log('🔑 AUTH - Token found, checking session...');
-    const session = await this.getCurrentSession();
-    return session !== null;
+    // Fast path: Check if we have cached session data
+    // This avoids the flash of login screen when user is actually authenticated
+    // We don't validate the token here - that happens in getCurrentSession()
+    const cachedResult = await chrome.storage.sync.get([
+      'mielto_user', 
+      'mielto_workspace',
+      'mielto_refresh_token' // Also check for refresh token as a sign of valid session
+    ]);
+
+    // If we have both user data and a refresh token, assume authenticated
+    // The token validation will happen when getCurrentSession is actually called
+    if (cachedResult.mielto_user && cachedResult.mielto_workspace && cachedResult.mielto_refresh_token) {
+      console.log('🔑 AUTH - Token and cache found, assuming authenticated (fast path)');
+      return true;
+    }
+
+    // If no cache but we have a token, still assume authenticated
+    // Worst case, getCurrentSession will handle validation and refresh
+    if (this.token) {
+      console.log('🔑 AUTH - Token found, assuming authenticated (will validate on use)');
+      return true;
+    }
+
+    console.log('🔑 AUTH - No authentication credentials found');
+    return false;
   }
 
   getToken(): string | null {
@@ -442,9 +935,9 @@ class MieltoAuth {
 
   async getAuthHeader(): Promise<string | null> {
     // Check for API key first
-    const settings = await chrome.storage.sync.get(['mielto_settings']);
-    const apiKey = settings.mielto_settings?.apiKey;
-    
+    const settings = await storage.getSettings();
+    const apiKey = settings.apiKey;
+
     if (apiKey) {
       return `Bearer ${apiKey}`;
     }
@@ -462,9 +955,9 @@ class MieltoAuth {
   }
 
   async getAuthMethod(): Promise<'API_KEY' | 'TOKEN' | 'NONE'> {
-    const settings = await chrome.storage.sync.get(['mielto_settings']);
-    const apiKey = settings.mielto_settings?.apiKey;
-    
+    const settings = await storage.getSettings();
+    const apiKey = settings.apiKey;
+
     if (apiKey) {
       return 'API_KEY';
     }
