@@ -6,7 +6,7 @@
 import React, { useState, useEffect, useRef, useReducer } from 'react';
 import ReactDOM from 'react-dom/client';
 import { Search, BookOpen, Sparkles, Settings as SettingsIcon, RefreshCw, Plus, CheckCircle, AlertCircle, Loader2, Eye, EyeOff, Zap, Mic, MicOff, X, AtSign, PhoneOff, ChevronDown, ChevronUp, Edit3 } from 'lucide-react';
-import { MessageType, TabInfo, StreamChunkPayload, StreamErrorPayload } from '@/types/messages';
+import { MessageType, TabInfo, StreamChunkPayload, StreamCompletePayload, StreamErrorPayload } from '@/types/messages';
 import { Memory, UserSettings } from '@/types/memory';
 import { mieltoAPI } from '@/utils/api';
 import { QuickActionsPopover } from '@/components/QuickActionsPopover';
@@ -168,6 +168,24 @@ const SidePanelInner: React.FC = () => {
         if (payload.requestId === streamingRequestId.current) {
           console.log('✅ Request ID matches - processing chunk');
           
+          // Add placeholder message on first chunk if not already added
+          setChatMessages(prev => {
+            // Check if we already have a streaming message (last message with empty content and assistant role)
+            const hasStreamingMessage = prev.length > 0 && 
+              prev[prev.length - 1].role === 'assistant' && 
+              prev[prev.length - 1].content === '';
+            
+            if (!hasStreamingMessage) {
+              const streamingMessage: ChatMessage = {
+                role: 'assistant',
+                content: '', // Will be updated via streaming
+                timestamp: new Date(),
+              };
+              return [...prev, streamingMessage];
+            }
+            return prev;
+          });
+          
           // SIMPLE: Just append to streamingContent state - this will trigger re-render
           setStreamingContent(prev => {
             const newContent = prev + payload.chunk;
@@ -180,42 +198,46 @@ const SidePanelInner: React.FC = () => {
         }
       }
 
-      // if (message.type === MessageType.STREAM_COMPLETE) {
-        // const payload = message.payload as StreamCompletePayload;
-        // if (payload.requestId === streamingRequestId.current) {
-        //   // Use fullResponse from payload if available, fallback to streamingContent
-        //   const finalContent = payload.fullResponse || streamingContent;
-        //   console.log('🏁 Stream complete - using final content:', finalContent.length, 'chars');
+      if (message.type === MessageType.STREAM_COMPLETE) {
+        const payload = message.payload as StreamCompletePayload;
+        if (payload.requestId === streamingRequestId.current) {
+          // Use fullResponse from payload if available, fallback to streamingContent
+          const finalContent = payload.fullResponse || streamingContent;
+          console.log('🏁 Stream complete - using final content:', finalContent.length, 'chars');
           
           // Create final assistant message
-          // const assistantMessage: ChatMessage = {
-          //   role: 'assistant',
-          //   content: finalContent,
-          //   timestamp: new Date(),
-          //   toolExecutions: payload.toolExecutions,
-          // };
+          const assistantMessage: ChatMessage = {
+            role: 'assistant',
+            content: finalContent,
+            timestamp: new Date(),
+            toolExecutions: payload.toolExecutions,
+          };
           
-          // Replace the streaming message with final message
-          // setChatMessages(prev => 
-          //   prev.map(msg => 
-          //     msg === prev.find(m => m.role === 'assistant' && streamingMessageId)
-          //       ? assistantMessage
-          //       : msg
-          //   )
-          // );
+          // Replace the last assistant message (streaming placeholder) with final message
+          setChatMessages(prev => {
+            const messages = [...prev];
+            // Find the last assistant message (should be our streaming placeholder)
+            for (let i = messages.length - 1; i >= 0; i--) {
+              if (messages[i].role === 'assistant') {
+                messages[i] = assistantMessage;
+                break;
+              }
+            }
+            return messages;
+          });
           
-        //   // Reset streaming state
-        //   setStreamingMessageId(null);
-        //   setStreamingContent('');
-        //   streamingRequestId.current = null;
-        //   setIsLoading(false);
+          // Reset streaming state
+          setStreamingMessageId(null);
+          setStreamingContent('');
+          streamingRequestId.current = null;
+          setIsLoading(false);
           
-        //   // Clear attached tabs and staged images after successful streaming
-        //   console.log('🧹 STREAM COMPLETE - Clearing attached tabs and staged images');
-        //   setAttachedTabs([]);
-        //   setStagedImages([]);
-        // }
-      // }
+          // Clear attached tabs and staged images after successful streaming
+          console.log('🧹 STREAM COMPLETE - Clearing attached tabs and staged images');
+          setAttachedTabs([]);
+          setStagedImages([]);
+        }
+      }
 
       if (message.type === MessageType.STREAM_ERROR) {
         const payload = message.payload as StreamErrorPayload;
@@ -1640,13 +1662,7 @@ const SidePanelInner: React.FC = () => {
       setStreamingContent('');
       console.log('🎬 TEXT INPUT - Set streamingMessageId:', streamMessageId);
 
-      // Add placeholder streaming message  
-      const streamingMessage: ChatMessage = {
-        role: 'assistant',
-        content: '', // Will be updated via streaming
-        timestamp: new Date(),
-      };
-      setChatMessages(prev => [...prev, streamingMessage]);
+      // Don't add placeholder message yet - will be added when first chunk arrives
 
       // Send streaming request
       const response = await chrome.runtime.sendMessage({
@@ -1804,7 +1820,7 @@ const SidePanelInner: React.FC = () => {
                                   // If this is the last message AND we're streaming AND it's an empty assistant message
                                   if (isLastMessage && hasStreamingId && isAssistant && isEmpty) {
                                     console.log('🎬 Showing streaming content:', streamingContent.length, 'chars');
-                                    return streamingContent || 'Thinking...';
+                                    return streamingContent || '';
                                   }
                                   // Otherwise show regular message content  
                                   console.log('💬 Showing regular message:', msg.content.length, 'chars');
@@ -1813,16 +1829,6 @@ const SidePanelInner: React.FC = () => {
                               } 
                               className="text-sm" 
                             />
-                            {/* Show typing indicator for streaming - when message is empty and no streaming content yet */}
-                            {idx === chatMessages.length - 1 && streamingMessageId && !streamingContent && (
-                              <div className="flex items-center gap-1 mt-1">
-                                <div className="flex space-x-1">
-                                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
-                                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{animationDelay: '0.1s'}}></div>
-                                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{animationDelay: '0.2s'}}></div>
-                                </div>
-                              </div>
-                            )}
                           </div>
                         )}
                         {msg.toolExecutions && msg.toolExecutions.length > 0 && (() => {
@@ -1908,10 +1914,13 @@ const SidePanelInner: React.FC = () => {
                   {isLoading && (
                     <div className="max-w-[85%] mr-auto">
                       <div className="px-4 py-3 rounded-2xl bg-gray-100 dark:bg-darkBg-secondary">
-                        <div className="flex gap-1">
-                          <span className="w-2 h-2 bg-gray-400 dark:bg-darkText-tertiary rounded-full animate-bounce"></span>
-                          <span className="w-2 h-2 bg-gray-400 dark:bg-darkText-tertiary rounded-full animate-bounce [animation-delay:0.2s]"></span>
-                          <span className="w-2 h-2 bg-gray-400 dark:bg-darkText-tertiary rounded-full animate-bounce [animation-delay:0.4s]"></span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm text-gray-600 dark:text-gray-400">Thinking</span>
+                          <div className="flex gap-1">
+                            <span className="w-2 h-2 bg-gray-400 dark:bg-darkText-tertiary rounded-full animate-bounce"></span>
+                            <span className="w-2 h-2 bg-gray-400 dark:bg-darkText-tertiary rounded-full animate-bounce [animation-delay:0.2s]"></span>
+                            <span className="w-2 h-2 bg-gray-400 dark:bg-darkText-tertiary rounded-full animate-bounce [animation-delay:0.4s]"></span>
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -2052,13 +2061,7 @@ const SidePanelInner: React.FC = () => {
                                 console.log('🎬🎬🎬 Set streamingMessageId:', streamMessageId);
                                 console.log('📋📋📋 Current streamingRequestId:', streamingRequestId.current);
 
-                                // Add placeholder streaming message
-                                const streamingMessage: ChatMessage = {
-                                  role: 'assistant',
-                                  content: '', // Will be updated via streaming
-                                  timestamp: new Date(),
-                                };
-                                setChatMessages(prev => [...prev, streamingMessage]);
+                                // Don't add placeholder message yet - will be added when first chunk arrives
 
                                 // Send streaming request to backend
                                 try {

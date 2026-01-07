@@ -707,7 +707,7 @@ async function handleAskIntella(payload: {
     console.log('🔍 Combined context:', combinedContext);
     
     // Step 3: Send to Mielto with combined context and conversation history
-    const model = payload.model || 'gpt-4o';
+    const model = payload.model || 'gpt-5-nano';
     const response = payload.screenshot 
       ? await mieltoAPI.askIntellaWithScreenshot(
           payload.question, 

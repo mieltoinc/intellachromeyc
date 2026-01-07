@@ -245,7 +245,7 @@ class MieltoAPI {
 
       // Use AI SDK client for generation
       const result = await aiSDKClient.generate(aiMessages, {
-        model: request.model || 'gpt-4o',
+        model: request.model || 'gpt-5-nano',
         temperature: request.temperature,
         maxTokens: request.max_tokens,
       });
@@ -737,7 +737,7 @@ This content should be indexed and made searchable for future queries. Please ac
       },
     ];
 
-    const formattedModel = this.formatModelId(model || 'gpt-4o');
+    const formattedModel = this.formatModelId(model || 'gpt-5-nano');
     const result = await handler.chat(messages, {
       model: formattedModel,
     });
@@ -818,7 +818,7 @@ This content should be indexed and made searchable for future queries. Please ac
       });
     }
 
-    const formattedModel = this.formatModelId(model || 'gpt-4o');
+    const formattedModel = this.formatModelId(model || 'gpt-5-nano');
     const result = await handler.chat(messages, {
       model: formattedModel,
     });
@@ -869,7 +869,7 @@ ${context ? `Current Context: ${context}` : ''}`;
       },
     ];
 
-    const formattedModel = this.formatModelId(model || 'gpt-4o');
+    const formattedModel = this.formatModelId(model || 'gpt-5-nano');
     
     // Use streaming version
     console.log('🚀 Starting stream request with messages:', messages.length, 'model:', formattedModel);
@@ -940,7 +940,7 @@ ${context ? `Current Context: ${context}` : ''}`;
       },
     ];
 
-    const formattedModel = this.formatModelId(model || 'gpt-4o');
+    const formattedModel = this.formatModelId(model || 'gpt-5-nano');
     
     // Use streaming version  
     const stream = await handler.streamChat(messages, {

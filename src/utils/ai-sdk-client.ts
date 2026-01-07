@@ -70,8 +70,7 @@ export class AISDKClient {
 
       this.config = {
         baseUrl: aiSdkBaseUrl,
-        model: 'gpt-4o',
-        temperature: 0.7,
+        model: 'gpt-5-nano',
         maxTokens: 2048,
       };
 
@@ -205,7 +204,7 @@ export class AISDKClient {
       });
 
       // Call the provider function with the model name to get the language model
-      const languageModel = openaiProvider.chat(model || 'gpt-4o');
+      const languageModel = openaiProvider.chat(model || 'gpt-5-nano');
 
       // Prepare messages for AI SDK
       const conversationMessages = messages
@@ -558,7 +557,7 @@ export class AISDKClient {
       });
 
       // Call the provider function with the model name to get the language model
-      const languageModel = openaiProvider.chat(model || 'gpt-4o');
+      const languageModel = openaiProvider.chat(model || 'gpt-5-nano');
 
       // Prepare messages for AI SDK - same logic as generate()
       const isReasoningModel = model.includes('o1') || model.includes('o3');
